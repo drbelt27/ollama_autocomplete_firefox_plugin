@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Ollama Assistant</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="container">
+    <header><h2>Assistente AI Ollama</h2></header>
+    
+    <div id="controls-section" class="section">
+      <div class="model-selector">
+        <label for="model">Modello:</label>
+        <select id="model">
+          <option value="">Caricamento...</option>
+        </select>
+      </div>
+      
+      <div class="tone-selector">
+        <label for="tone">Tono:</label>
+        <select id="tone">
+          <option value="formale">Formale</option>
+          <option value="professionale" selected>Professionale</option>
+          <option value="amichevole">Amichevole</option>
+        </select>
+      </div>
+      
+      <div class="prompts-section">
+        <label>Prompt Predefiniti:</label>
+        <div id="predefined-prompts" class="prompts-grid"></div>
+      </div>
+      
+      <div class="custom-prompt">
+        <label for="custom-prompt-input">Prompt Personalizzato:</label>
+        <textarea id="custom-prompt-input" placeholder="Scrivi il tuo prompt..."></textarea>
+      </div>
+      
+      <button id="ask-btn" class="btn btn-primary" disabled>Chiedi</button>
+    </div>
+    
+    <div id="loading-section" class="section hidden">
+      <div class="loading-spinner"></div>
+      <p>Elaborazione in corso...</p>
+    </div>
+    
+    <div id="preview-section" class="section hidden">
+      <h3>Anteprima Risposta:</h3>
+      <div id="preview-text" class="preview-box"></div>
+      
+      <div class="action-buttons">
+        <button id="accept-btn" class="btn btn-success">Accetta</button>
+        <button id="discard-btn" class="btn btn-danger">Scarta</button>
+        <button id="modify-btn" class="btn btn-info">Richiedi Modifica</button>
+      </div>
+    </div>
+    
+    <div id="modify-section" class="section hidden">
+      <label for="modify-input">Descrivi la modifica:</label>
+      <textarea id="modify-input" placeholder="Es: Rendi più formale, aggiungi esempi..."></textarea>
+      <button id="submit-modify-btn" class="btn btn-primary">Invia Modifica</button>
+    </div>
+    
+    <div id="error-section" class="section hidden">
+      <div class="error-message">
+        <p id="error-text"></p>
+      </div>
+      <button id="retry-btn" class="btn btn-secondary">Riprova</button>
+    </div>
+  </div>
+  <script src="popup.js"></script>
+</body>
+</html>

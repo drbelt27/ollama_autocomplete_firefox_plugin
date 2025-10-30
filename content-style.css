@@ -1,0 +1,37 @@
+.ollama-floating-widget {
+  position: absolute;
+  z-index: 999999 !important;
+  pointer-events: auto;
+}
+
+.ollama-widget-content {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
+  padding: 4px;
+}
+
+.ollama-widget-btn {
+  width: 40px;
+  height: 40px;
+  border: none;
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+}
+
+.ollama-widget-btn:hover {
+  transform: scale(1.1);
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.6);
+}
+
+.ollama-widget-btn svg {
+  width: 20px;
+  height: 20px;
+}

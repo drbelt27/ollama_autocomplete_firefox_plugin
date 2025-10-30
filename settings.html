@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Impostazioni Ollama Assistant</title>
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <div class="container">
+    <header><h1>Impostazioni Ollama Assistant</h1></header>
+
+    <section class="settings-section">
+      <h2>Configurazione Server</h2>
+      <div class="form-group">
+        <label for="ollama-url">URL Server Ollama:</label>
+        <input type="text" id="ollama-url" placeholder="http://localhost:11434" />
+        <p class="help-text">Inserisci l'URL completo del server Ollama (es. http://localhost:11434)</p>
+      </div>
+      <div class="form-group">
+        <label for="model-select">Modello di default:</label>
+        <select id="model-select"></select>
+        <p class="help-text">Seleziona il modello AI di base. La lista si aggiorna in base al server e puoi cambiarlo anche dal widget popup.</p>
+      </div>
+      <button id="test-connection" class="btn btn-secondary">Testa Connessione e Modelli</button>
+      <div id="connection-status" class="status-message hidden"></div>
+    </section>
+
+    <section class="settings-section">
+      <h2>Prompt Predefiniti</h2>
+      <div class="prompts-list" id="prompts-list"></div>
+      <div class="add-prompt">
+        <input type="text" id="new-prompt" placeholder="Nuovo prompt..." />
+        <button id="add-prompt-btn" class="btn btn-primary">Aggiungi</button>
+      </div>
+    </section>
+
+    <div class="actions">
+      <button id="save-btn" class="btn btn-success">Salva Impostazioni</button>
+      <button id="reset-btn" class="btn btn-danger">Ripristina Default</button>
+    </div>
+
+    <div id="save-status" class="status-message hidden"></div>
+  </div>
+  <script src="settings.js"></script>
+</body>
+</html>

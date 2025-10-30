@@ -1,0 +1,40 @@
+{
+  "manifest_version": 2,
+  "name": "Ollama Textarea Assistant",
+  "version": "2.1.1",
+  "description": "Assistente AI con Ollama",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs",
+    "contextMenus",
+    "notifications",
+    "<all_urls>"
+  ],
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "{eedcf79e-cf20-4fa0-a90a-da3fd369baa6}",
+      "strict_min_version": "91.0"
+    }
+  },
+  "background": {
+    "scripts": ["background.js"],
+    "persistent": true
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content-script.js"],
+      "run_at": "document_end",
+      "all_frames": true
+    }
+  ],
+  "browser_action": {
+    "default_popup": "popup.html",
+    "default_title": "Ollama AI Assistant"
+  },
+  "options_ui": {
+    "page": "settings.html",
+    "open_in_tab": true
+  }
+}
