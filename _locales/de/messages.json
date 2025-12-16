@@ -1,0 +1,102 @@
+{
+  "extensionName": {
+    "message": "Ollama Textarea Assistant",
+    "description": "Name der Erweiterung"
+  },
+  "extensionDescription": {
+    "message": "KI-Assistent mit Ollama",
+    "description": "Beschreibung der Erweiterung"
+  },
+  "contextMenuTitle": {
+    "message": "Ollama Assistant",
+    "description": "Titel des Kontextmenüs"
+  },
+  "contextMenuCustomPrompt": {
+    "message": "Eigener Prompt...",
+    "description": "Menüpunkt für eigenen Prompt"
+  },
+  "contextMenuNotification": {
+    "message": "Lade diese Seite (F5) neu, um den Assistenten auf diesem Tab zu aktivieren.",
+    "description": "Benachrichtigung wenn Content-Skript nicht geladen ist"
+  },
+  "prompt1": {
+    "message": "Korrigiere Grammatikfehler",
+    "description": "Erster Standardprompt"
+  },
+  "prompt2": {
+    "message": "Formuliere den Text klarer",
+    "description": "Zweiter Standardprompt"
+  },
+  "prompt3": {
+    "message": "Fasse die Kernaussagen zusammen",
+    "description": "Dritter Standardprompt"
+  },
+  "prompt4": {
+    "message": "Erweitere den Text mit mehr Details",
+    "description": "Vierter Standardprompt"
+  },
+  "prompt5": {
+    "message": "Übersetze ins Englische",
+    "description": "Fünfter Standardprompt"
+  },
+  "toneFormal": {
+    "message": "Formell",
+    "description": "Formeller Ton"
+  },
+  "toneProfessional": {
+    "message": "Professionell",
+    "description": "Professioneller Ton"
+  },
+  "toneFriendly": {
+    "message": "Freundlich",
+    "description": "Freundlicher Ton"
+  },
+  "toneCasual": {
+    "message": "Locker",
+    "description": "Lockerer Ton"
+  },
+  "widgetTitle": {
+    "message": "Ollama Assistent",
+    "description": "Widget-Titel"
+  },
+  "widgetClose": {
+    "message": "Schließen",
+    "description": "Schließen-Schaltfläche"
+  },
+  "widgetToneLabel": {
+    "message": "Ton",
+    "description": "Ton-Label"
+  },
+  "widgetPromptLabel": {
+    "message": "Prompt",
+    "description": "Prompt-Label"
+  },
+  "widgetAskButton": {
+    "message": "Ausführen",
+    "description": "Ausführen-Schaltfläche"
+  },
+  "widgetAcceptButton": {
+    "message": "Übernehmen",
+    "description": "Übernehmen-Schaltfläche"
+  },
+  "widgetDiscardButton": {
+    "message": "Verwerfen",
+    "description": "Verwerfen-Schaltfläche"
+  },
+  "widgetModifyButton": {
+    "message": "Ändern",
+    "description": "Ändern-Schaltfläche"
+  },
+  "widgetRetryButton": {
+    "message": "Erneut versuchen",
+    "description": "Erneut-versuchen-Schaltfläche"
+  },
+  "widgetPromptPlaceholder": {
+    "message": "Schreibe deine Anweisung...",
+    "description": "Prompt-Feld-Platzhalter"
+  },
+  "widgetLoading": {
+    "message": "Verarbeitung läuft...",
+    "description": "Lademeldung"
+  }
+}

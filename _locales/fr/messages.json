@@ -1,0 +1,102 @@
+{
+  "extensionName": {
+    "message": "Ollama Textarea Assistant",
+    "description": "Nom de l'extension"
+  },
+  "extensionDescription": {
+    "message": "Assistant IA avec Ollama",
+    "description": "Description de l'extension"
+  },
+  "contextMenuTitle": {
+    "message": "Assistant Ollama",
+    "description": "Titre du menu contextuel"
+  },
+  "contextMenuCustomPrompt": {
+    "message": "Invite personnalisée...",
+    "description": "Élément de menu pour invite personnalisée"
+  },
+  "contextMenuNotification": {
+    "message": "Recharge la page (F5) pour activer l'assistant sur cet onglet.",
+    "description": "Notification quand le script de contenu n'est pas chargé"
+  },
+  "prompt1": {
+    "message": "Corrige les fautes de grammaire",
+    "description": "Première invite par défaut"
+  },
+  "prompt2": {
+    "message": "Rends le texte plus clair",
+    "description": "Deuxième invite par défaut"
+  },
+  "prompt3": {
+    "message": "Résume les idées principales",
+    "description": "Troisième invite par défaut"
+  },
+  "prompt4": {
+    "message": "Développe le texte avec plus de détails",
+    "description": "Quatrième invite par défaut"
+  },
+  "prompt5": {
+    "message": "Traduis en anglais",
+    "description": "Cinquième invite par défaut"
+  },
+  "toneFormal": {
+    "message": "Formel",
+    "description": "Ton formel"
+  },
+  "toneProfessional": {
+    "message": "Professionnel",
+    "description": "Ton professionnel"
+  },
+  "toneFriendly": {
+    "message": "Amical",
+    "description": "Ton amical"
+  },
+  "toneCasual": {
+    "message": "Décontracté",
+    "description": "Ton décontracté"
+  },
+  "widgetTitle": {
+    "message": "Assistant Ollama",
+    "description": "Titre du widget"
+  },
+  "widgetClose": {
+    "message": "Fermer",
+    "description": "Bouton fermer"
+  },
+  "widgetToneLabel": {
+    "message": "Ton",
+    "description": "Label ton"
+  },
+  "widgetPromptLabel": {
+    "message": "Invite",
+    "description": "Label invite"
+  },
+  "widgetAskButton": {
+    "message": "Lancer",
+    "description": "Bouton lancer"
+  },
+  "widgetAcceptButton": {
+    "message": "Accepter",
+    "description": "Bouton accepter"
+  },
+  "widgetDiscardButton": {
+    "message": "Ignorer",
+    "description": "Bouton ignorer"
+  },
+  "widgetModifyButton": {
+    "message": "Modifier",
+    "description": "Bouton modifier"
+  },
+  "widgetRetryButton": {
+    "message": "Réessayer",
+    "description": "Bouton réessayer"
+  },
+  "widgetPromptPlaceholder": {
+    "message": "Écris ton instruction...",
+    "description": "Placeholder du champ invite"
+  },
+  "widgetLoading": {
+    "message": "Traitement en cours...",
+    "description": "Message de chargement"
+  }
+}

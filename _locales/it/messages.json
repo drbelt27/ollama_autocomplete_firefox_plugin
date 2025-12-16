@@ -1,0 +1,102 @@
+{
+  "extensionName": {
+    "message": "Ollama Textarea Assistant",
+    "description": "Nome dell'estensione"
+  },
+  "extensionDescription": {
+    "message": "Assistente AI con Ollama",
+    "description": "Descrizione dell'estensione"
+  },
+  "contextMenuTitle": {
+    "message": "Ollama Assistant",
+    "description": "Titolo del menu contestuale"
+  },
+  "contextMenuCustomPrompt": {
+    "message": "Prompt personalizzato...",
+    "description": "Voce menu prompt personalizzato"
+  },
+  "contextMenuNotification": {
+    "message": "Ricarica la pagina (F5) per usare l'assistente su questa scheda.",
+    "description": "Notifica quando il content script non è caricato"
+  },
+  "prompt1": {
+    "message": "Correggi gli errori grammaticali",
+    "description": "Primo prompt predefinito"
+  },
+  "prompt2": {
+    "message": "Rendi il testo più chiaro",
+    "description": "Secondo prompt predefinito"
+  },
+  "prompt3": {
+    "message": "Riassumi mantenendo i concetti chiave",
+    "description": "Terzo prompt predefinito"
+  },
+  "prompt4": {
+    "message": "Espandi il testo con maggiori dettagli",
+    "description": "Quarto prompt predefinito"
+  },
+  "prompt5": {
+    "message": "Traduci in inglese",
+    "description": "Quinto prompt predefinito"
+  },
+  "toneFormal": {
+    "message": "Formale",
+    "description": "Tono formale"
+  },
+  "toneProfessional": {
+    "message": "Professionale",
+    "description": "Tono professionale"
+  },
+  "toneFriendly": {
+    "message": "Amichevole",
+    "description": "Tono amichevole"
+  },
+  "toneCasual": {
+    "message": "Casual",
+    "description": "Tono casual"
+  },
+  "widgetTitle": {
+    "message": "Assistente Ollama",
+    "description": "Titolo del widget"
+  },
+  "widgetClose": {
+    "message": "Chiudi",
+    "description": "Bottone chiudi"
+  },
+  "widgetToneLabel": {
+    "message": "Tono",
+    "description": "Label per il tono"
+  },
+  "widgetPromptLabel": {
+    "message": "Prompt",
+    "description": "Label per il prompt"
+  },
+  "widgetAskButton": {
+    "message": "Elabora",
+    "description": "Bottone per elaborare"
+  },
+  "widgetAcceptButton": {
+    "message": "Accetta",
+    "description": "Bottone accetta"
+  },
+  "widgetDiscardButton": {
+    "message": "Scarta",
+    "description": "Bottone scarta"
+  },
+  "widgetModifyButton": {
+    "message": "Modifica",
+    "description": "Bottone modifica"
+  },
+  "widgetRetryButton": {
+    "message": "Riprova",
+    "description": "Bottone riprova"
+  },
+  "widgetPromptPlaceholder": {
+    "message": "Scrivi il tuo prompt...",
+    "description": "Placeholder del campo prompt"
+  },
+  "widgetLoading": {
+    "message": "Elaborazione in corso...",
+    "description": "Messaggio di caricamento"
+  }
+}

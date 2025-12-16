@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(dir \"c:\\Users\\Matteo\\VS_Project\\ollama_autocomplete_firefox_plugin\\icons\" /B)"
+      "Bash(done)",
+      "Bash(find:*)"
     ]
   }
 }

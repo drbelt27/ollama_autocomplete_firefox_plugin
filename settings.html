@@ -2,76 +2,78 @@
 <html>
 <head>
   <meta charset="UTF-8">
-  <title>Impostazioni Ollama Assistant</title>
+  <title>Ollama Assistant Settings</title>
   <link rel="stylesheet" href="settings.css">
 </head>
 <body>
   <div class="container">
     <header>
       <img src="icons/icon-96.png" alt="Ollama Logo" class="settings-logo" />
-      <h1>Impostazioni Ollama Assistant</h1>
+      <h1 id="settings-page-title">Ollama Assistant Settings</h1>
     </header>
 
     <section class="settings-section">
-      <h2>Configurazione Server</h2>
+      <h2 id="server-section-title">Server Configuration</h2>
       <div class="form-group">
-        <label for="ollama-url">URL Server Ollama:</label>
+        <label for="ollama-url" id="label-ollama-url">Ollama server URL</label>
         <input type="text" id="ollama-url" placeholder="http://localhost:11434" />
-        <p class="help-text">Inserisci l'URL completo del server Ollama (es. http://localhost:11434)</p>
+        <p class="help-text" id="help-ollama-url">Enter the full Ollama URL (e.g. http://localhost:11434).</p>
       </div>
       <div class="form-group">
-        <label for="model-select">Modello di default:</label>
+        <label for="model-select" id="label-model-select">Default model</label>
         <select id="model-select"></select>
-        <p class="help-text">Seleziona il modello AI di base. La lista si aggiorna in base al server e puoi cambiarlo anche dal widget popup.</p>
+        <p class="help-text" id="help-model-select">Pick the base model. You can still change it from the popup.</p>
       </div>
-      <button id="test-connection" class="btn btn-secondary">Testa Connessione e Modelli</button>
+      <div class="form-group">
+        <label for="language-select" id="label-language-select">Interface language</label>
+        <select id="language-select"></select>
+        <p class="help-text" id="help-language-select">Choose the language for labels, prompts, and widget text.</p>
+      </div>
+      <button id="test-connection" class="btn btn-secondary">Test Connection &amp; Models</button>
       <div id="connection-status" class="status-message hidden"></div>
     </section>
 
     <section class="settings-section">
-      <h2>Preferenze Assistente</h2>
+      <h2 id="preferences-section-title">Assistant Preferences</h2>
       <div class="form-group">
-        <label for="default-tone">Tono di default:</label>
-        <select id="default-tone">
-          <option value="formale">Formale</option>
-          <option value="professionale" selected>Professionale</option>
-          <option value="amichevole">Amichevole</option>
-          <option value="casual">Casual</option>
-        </select>
-        <p class="help-text">Tono predefinito utilizzato per le risposte dell'assistente.</p>
+        <label for="default-tone" id="label-default-tone">Default tone</label>
+        <select id="default-tone"></select>
+        <p class="help-text" id="help-default-tone">Tone that is preselected when opening the assistant.</p>
       </div>
       <div class="form-group">
-        <label class="checkbox-label">
+        <label class="checkbox-label" id="label-show-floating">
           <input type="checkbox" id="show-floating-widget" checked />
-          Mostra widget floating quando selezioni il testo
+          <span class="label-text">Show floating widget when text is selected</span>
         </label>
-        <p class="help-text">Disattiva se non vuoi vedere il piccolo widget che appare quando selezioni il testo in un campo editabile.</p>
+        <p class="help-text" id="help-show-floating">Disable this if you prefer the toolbar or context menu.</p>
       </div>
       <div class="form-group">
-        <label class="checkbox-label">
+        <label class="checkbox-label" id="label-debug-mode">
           <input type="checkbox" id="debug-mode" />
-          Abilita modalità debug
+          <span class="label-text">Enable debug mode</span>
         </label>
-        <p class="help-text">Mostra log dettagliati delle risposte API di Ollama in console per diagnosticare problemi di connessione.</p>
+        <p class="help-text" id="help-debug-mode">Logs detailed Ollama responses in the console.</p>
       </div>
     </section>
 
     <section class="settings-section">
-      <h2>Prompt Predefiniti</h2>
+      <h2 id="prompts-section-title">Quick Prompts</h2>
+      <label id="label-prompts-list" for="prompts-list">Prompt list</label>
       <div class="prompts-list" id="prompts-list"></div>
       <div class="add-prompt">
-        <input type="text" id="new-prompt" placeholder="Nuovo prompt..." />
-        <button id="add-prompt-btn" class="btn btn-primary">Aggiungi</button>
+        <input type="text" id="new-prompt" placeholder="New prompt..." />
+        <button id="add-prompt-btn" class="btn btn-primary">Add</button>
       </div>
     </section>
 
     <div class="actions">
-      <button id="save-btn" class="btn btn-success">Salva Impostazioni</button>
-      <button id="reset-btn" class="btn btn-danger">Ripristina Default</button>
+      <button id="save-btn" class="btn btn-success">Save Settings</button>
+      <button id="reset-btn" class="btn btn-danger">Restore Defaults</button>
     </div>
 
     <div id="save-status" class="status-message hidden"></div>
   </div>
+  <script src="i18n.js"></script>
   <script src="settings.js"></script>
 </body>
 </html>

@@ -9,90 +9,91 @@
   <div class="container">
     <header>
       <img src="icons/icon-48.png" alt="Ollama Logo" class="header-logo" />
-      <h2>Assistente AI Ollama</h2>
+      <h2>Ollama AI Assistant</h2>
     </header>
 
     <div id="connection-error-section" class="section hidden">
       <div class="error-message">
-        <p>⚠️ Connessione a Ollama non disponibile</p>
-        <p class="help-text">Configura l'URL del server Ollama nelle impostazioni o riprova la connessione.</p>
+        <p>Ollama is not reachable</p>
+        <p class="help-text">Set the Ollama server URL in the settings or retry the connection.</p>
       </div>
       <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
-        <button id="retry-connection-btn" class="btn btn-secondary">Riprova</button>
-        <button id="open-settings-btn" class="btn btn-primary">Impostazioni</button>
+        <button id="retry-connection-btn" class="btn btn-secondary">Retry</button>
+        <button id="open-settings-btn" class="btn btn-primary">Settings</button>
       </div>
     </div>
 
     <div id="controls-section" class="section">
       <div class="model-selector">
-        <label for="model">Modello:</label>
+        <label for="model">Model:</label>
         <select id="model">
-          <option value="">Caricamento...</option>
+          <option value="">Loading...</option>
         </select>
       </div>
 
       <div class="tone-selector">
-        <label>Tono:</label>
+        <label>Tone:</label>
         <div class="tone-buttons">
-          <button class="tone-btn" data-tone="formale">Formale</button>
-          <button class="tone-btn" data-tone="professionale">Professionale</button>
-          <button class="tone-btn" data-tone="amichevole">Amichevole</button>
+          <button class="tone-btn" data-tone="formale">Formal</button>
+          <button class="tone-btn" data-tone="professionale">Professional</button>
+          <button class="tone-btn" data-tone="amichevole">Friendly</button>
           <button class="tone-btn" data-tone="casual">Casual</button>
         </div>
       </div>
 
       <div class="length-selector">
-        <label for="length">Lunghezza Risposta:</label>
+        <label for="length">Response length:</label>
         <select id="length">
-          <option value="breve">Breve</option>
-          <option value="media" selected>Media</option>
-          <option value="lunga">Lunga</option>
-          <option value="dettagliata">Molto Dettagliata</option>
+          <option value="breve">Short</option>
+          <option value="media" selected>Medium</option>
+          <option value="lunga">Long</option>
+          <option value="dettagliata">Very detailed</option>
         </select>
       </div>
-      
+
       <div class="prompts-section">
-        <label>Prompt Predefiniti:</label>
+        <label>Quick prompts:</label>
         <div id="predefined-prompts" class="prompts-grid"></div>
       </div>
-      
+
       <div class="custom-prompt">
-        <label for="custom-prompt-input">Prompt Personalizzato:</label>
-        <textarea id="custom-prompt-input" placeholder="Scrivi il tuo prompt..."></textarea>
+        <label for="custom-prompt-input">Custom prompt:</label>
+        <textarea id="custom-prompt-input" placeholder="Write your instruction..."></textarea>
       </div>
-      
-      <button id="ask-btn" class="btn btn-primary" disabled>Chiedi</button>
+
+      <button id="ask-btn" class="btn btn-primary" disabled>Ask</button>
     </div>
-    
+
     <div id="loading-section" class="section hidden">
       <div class="loading-spinner"></div>
-      <p>Elaborazione in corso...</p>
+      <p>Processing...</p>
     </div>
-    
+
     <div id="preview-section" class="section hidden">
-      <h3>Anteprima Risposta:</h3>
+      <h3>Preview:</h3>
       <div id="preview-text" class="preview-box"></div>
-      
+
       <div class="action-buttons">
-        <button id="accept-btn" class="btn btn-success">Accetta</button>
-        <button id="discard-btn" class="btn btn-danger">Scarta</button>
-        <button id="modify-btn" class="btn btn-info">Richiedi Modifica</button>
+        <button id="accept-btn" class="btn btn-success">Accept</button>
+        <button id="discard-btn" class="btn btn-danger">Discard</button>
+        <button id="modify-btn" class="btn btn-info">Request Change</button>
       </div>
     </div>
-    
+
     <div id="modify-section" class="section hidden">
-      <label for="modify-input">Descrivi la modifica:</label>
-      <textarea id="modify-input" placeholder="Es: Rendi più formale, aggiungi esempi..."></textarea>
-      <button id="submit-modify-btn" class="btn btn-primary">Invia Modifica</button>
+      <label for="modify-input">Describe the change:</label>
+      <textarea id="modify-input" placeholder="E.g. make it more formal, add examples..."></textarea>
+      <button id="submit-modify-btn" class="btn btn-primary">Send Change</button>
     </div>
-    
+
     <div id="error-section" class="section hidden">
       <div class="error-message">
         <p id="error-text"></p>
       </div>
-      <button id="retry-btn" class="btn btn-secondary">Riprova</button>
+      <button id="retry-btn" class="btn btn-secondary">Retry</button>
     </div>
   </div>
+  <script src="i18n.js"></script>
   <script src="popup.js"></script>
 </body>
 </html>

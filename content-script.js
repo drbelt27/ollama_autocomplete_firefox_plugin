@@ -1,371 +1,562 @@
 (function () {
   "use strict";
 
+  const DEFAULT_URL = "http://localhost:11434";
+  const DEFAULT_MODEL = "llama3";
+  const DEFAULT_TONE = "professionale";
+  const LANGUAGE_PREF_DEFAULT = "system";
+  const DEFAULT_LANGUAGE = "it";
+
   if (window.ollamaAssistantInjected) return;
   window.ollamaAssistantInjected = true;
 
-  // Previeni esecuzione in iframe di terze parti (es. reCAPTCHA, ads, ecc.)
-  // Esegui solo se siamo nel frame principale O in iframe dello stesso dominio
-  try {
-    if (window.self !== window.top) {
-      // Siamo in un iframe
-      // Verifica se è dello stesso dominio
-      try {
-        const topDomain = window.top.location.hostname;
-        const currentDomain = window.location.hostname;
+  if (!shouldInject()) return;
 
-        // Se sono domini diversi, non eseguire
-        if (topDomain !== currentDomain) {
-          console.log("Ollama Assistant: iframe terze parti rilevato, skip injection");
-          return;
-        }
-      } catch (e) {
-        // Cross-origin iframe - non possiamo accedere a window.top.location
-        console.log("Ollama Assistant: iframe cross-origin rilevato, skip injection");
-        return;
-      }
-    }
-  } catch (e) {
-    // Se c'è un errore, meglio non eseguire
-    return;
+  function formatTemplate(template, values = {}) {
+    if (!template) return "";
+    return template.replace(/\$\{(\w+)\}/g, (_, key) =>
+      typeof values[key] === "undefined" ? "" : String(values[key])
+    );
   }
 
-  console.log("Ollama Assistant caricato");
+  // Fallback se OllamaI18N non è caricato
+  const FALLBACK_STRINGS = {
+    ai: {
+      htmlSystem: "You are an HTML editor. Preserve every HTML tag and structure exactly as received. Return only the modified HTML without code blocks or explanations.",
+      htmlUserTemplate: "HTML content:\n${text}\n\nInstruction: ${prompt}\nTone: ${tone}.\nReturn only the modified HTML.",
+      plainSystem: "You transform user text. Always keep the same language as the input unless the user explicitly asks for a translation. Return only the transformed text without quotes, code blocks, or explanations.",
+      plainUserTemplate: "Original text:\n${text}\n\nRequest: ${prompt}\nTone: ${tone}.\nReturn only the improved text.",
+    },
+    widget: {
+      title: "Ollama Assistant",
+      closeLabel: "Chiudi",
+      toneLabel: "Tono",
+      promptLabel: "Prompt",
+      promptPlaceholder: "Scrivi il tuo prompt...",
+      customPromptPlaceholder: "Descrivi la tua istruzione...",
+      selectTextAlert: "Seleziona del testo prima di aprire l'assistente.",
+      selectPromptError: "Seleziona un prompt o scrivi un'istruzione.",
+      askButton: "Elabora",
+      accept: "Accetta",
+      modify: "Modifica",
+      discard: "Scarta",
+      retry: "Riprova",
+      loading: "Elaborazione in corso...",
+    },
+    tones: [
+      { value: "formale", label: "Formale" },
+      { value: "professionale", label: "Professionale" },
+      { value: "amichevole", label: "Amichevole" },
+      { value: "casual", label: "Casual" },
+    ],
+    toneMentions: {
+      formale: "formal",
+      professionale: "professional",
+      amichevole: "friendly",
+      casual: "casual",
+    },
+    prompts: [
+      "Correggi gli errori grammaticali",
+      "Rendi il testo più chiaro",
+      "Riassumi mantenendo i concetti chiave"
+    ],
+  };
 
-  let floatingSelectionWidget = null;
-  let inPageWidget = null;
-  let lastSelectedText = "";
-  let lastActiveElement = null;
-  let lastSelectionStart = 0;
-  let lastSelectionEnd = 0;
-  let savedRange = null;
-  let conversationHistory = [];
-  let ollamaUrl = "";
-  let defaultModel = "";
-  let defaultPrompts = [];
-  let defaultTone = "professionale";
-  let selectedTone = "professionale";
-  let showFloatingWidget = true;
-  let isDragging = false;
-  let dragStartX = 0;
-  let dragStartY = 0;
-  let widgetStartX = 0;
-  let widgetStartY = 0;
+  const getLanguagePack = () => {
+    if (typeof window.OllamaI18N === 'undefined') {
+      console.warn('OllamaI18N non disponibile nel content script, uso fallback');
+      return FALLBACK_STRINGS;
+    }
+    const lang = window.OllamaI18N.resolveLanguage(LANGUAGE_PREF_DEFAULT);
+    return window.OllamaI18N.get(lang);
+  };
 
-  browser.storage.local
-    .get(["ollamaUrl", "defaultModel", "defaultPrompts", "defaultTone", "showFloatingWidget"])
-    .then((result) => {
-      ollamaUrl = result.ollamaUrl || "http://localhost:11434";
-      defaultModel = result.defaultModel || "llama3";
-      defaultPrompts = result.defaultPrompts || [];
-      defaultTone = result.defaultTone || "professionale";
-      selectedTone = defaultTone;
-      showFloatingWidget = result.showFloatingWidget !== false;
+  const state = {
+    floatingWidget: null,
+    inPageWidget: null,
+    widgetHost: null,
+    widgetShadow: null,
+    conversationHistory: [],
+    lastSelectedText: "",
+    lastActiveElement: null,
+    lastSelectionStart: 0,
+    lastSelectionEnd: 0,
+    savedRange: null,
+    isDragging: false,
+    dragStart: { x: 0, y: 0 },
+    widgetStart: { x: 0, y: 0 },
+    currentDragHandle: null,
+    selectedTone: DEFAULT_TONE,
+    selectionTimeout: null,
+    languagePreference: LANGUAGE_PREF_DEFAULT,
+    language: typeof window.OllamaI18N !== 'undefined' ? window.OllamaI18N.resolveLanguage(LANGUAGE_PREF_DEFAULT) : DEFAULT_LANGUAGE,
+    strings: getLanguagePack(),
+    config: {
+      ollamaUrl: DEFAULT_URL,
+      defaultModel: DEFAULT_MODEL,
+      defaultPrompts: [],
+      defaultTone: DEFAULT_TONE,
+      showFloatingWidget: true,
+    },
+  };
+  state.config.defaultPrompts = state.strings.prompts ? [...state.strings.prompts] : [];
+
+  init();
+
+  async function init() {
+    await hydrateSettings();
+    subscribeToStorageChanges();
+
+    document.addEventListener("mouseup", handleSelectionChange, true);
+    document.addEventListener("keyup", handleSelectionChange, true);
+    document.addEventListener("selectionchange", () => {
+      clearTimeout(state.selectionTimeout);
+      state.selectionTimeout = setTimeout(() => captureSelection(false), 60);
     });
+    document.addEventListener("mousemove", handleWidgetDragMove);
+    document.addEventListener("mouseup", handleWidgetDragEnd);
 
-  // Aggiorna impostazioni quando cambiano
-  browser.storage.onChanged.addListener((changes, area) => {
-    if (area === 'local') {
-      if (changes.showFloatingWidget) {
-        showFloatingWidget = changes.showFloatingWidget.newValue !== false;
+    browser.runtime.onMessage.addListener(handleRuntimeMessage);
+  }
+  function shouldInject() {
+    try {
+      if (window.top === window.self) {
+        return true;
+      }
+      try {
+        return window.top.location.hostname === window.location.hostname;
+      } catch (error) {
+        return false;
+      }
+    } catch (error) {
+      return false;
+    }
+  }
+
+  async function hydrateSettings() {
+    const stored = await browser.storage.local.get([
+      "ollamaUrl",
+      "defaultModel",
+      "defaultPrompts",
+      "defaultTone",
+      "showFloatingWidget",
+      "language",
+    ]);
+
+    state.languagePreference = stored.language || LANGUAGE_PREF_DEFAULT;
+    if (typeof window.OllamaI18N !== 'undefined') {
+      state.language = window.OllamaI18N.resolveLanguage(state.languagePreference);
+      state.strings = window.OllamaI18N.get(state.language);
+    }
+    state.config.ollamaUrl = stored.ollamaUrl || DEFAULT_URL;
+    state.config.defaultModel = stored.defaultModel || DEFAULT_MODEL;
+    state.config.defaultPrompts =
+      stored.defaultPrompts && stored.defaultPrompts.length
+        ? stored.defaultPrompts
+        : [...state.strings.prompts];
+    state.config.defaultTone = stored.defaultTone || DEFAULT_TONE;
+    state.config.showFloatingWidget = stored.showFloatingWidget !== false;
+    state.selectedTone = state.config.defaultTone;
+  }
+
+  function subscribeToStorageChanges() {
+    browser.storage.onChanged.addListener((changes, area) => {
+      if (area !== "local") return;
+      if (changes.ollamaUrl) {
+        state.config.ollamaUrl = changes.ollamaUrl.newValue || DEFAULT_URL;
+      }
+      if (changes.defaultModel) {
+        state.config.defaultModel = changes.defaultModel.newValue || DEFAULT_MODEL;
       }
       if (changes.defaultPrompts) {
-        defaultPrompts = changes.defaultPrompts.newValue || [];
+        state.config.defaultPrompts = changes.defaultPrompts.newValue || [];
+        renderPromptButtons();
       }
       if (changes.defaultTone) {
-        defaultTone = changes.defaultTone.newValue || "professionale";
-        selectedTone = defaultTone;
+        state.config.defaultTone = changes.defaultTone.newValue || DEFAULT_TONE;
+        state.selectedTone = state.config.defaultTone;
+        renderToneButtons();
+      }
+      if (changes.language) {
+        state.languagePreference = changes.language.newValue || LANGUAGE_PREF_DEFAULT;
+        if (typeof window.OllamaI18N !== 'undefined') {
+          state.language = window.OllamaI18N.resolveLanguage(state.languagePreference);
+          state.strings = window.OllamaI18N.get(state.language);
+        }
+        if (!state.config.defaultPrompts.length) {
+          state.config.defaultPrompts = [...state.strings.prompts];
+        }
+        if (state.widgetHost) {
+          state.widgetHost.remove();
+          state.widgetHost = null;
+          state.widgetShadow = null;
+        }
+        state.currentDragHandle = null;
+        state.inPageWidget = null;
+        if (state.floatingWidget) {
+          const button = state.floatingWidget.querySelector("button");
+          if (button) button.title = state.strings.widget.title;
+        }
+        renderToneButtons();
+        renderPromptButtons();
+      }
+      if (changes.showFloatingWidget) {
+        state.config.showFloatingWidget = changes.showFloatingWidget.newValue !== false;
+        if (!state.config.showFloatingWidget && state.floatingWidget) {
+          state.floatingWidget.style.display = "none";
+        }
+      }
+    });
+  }
+
+  function resolveEditableContext() {
+    const activeElement = document.activeElement;
+    if (activeElement && activeElement.tagName === "IFRAME") {
+      try {
+        const iframeDoc = activeElement.contentDocument || activeElement.contentWindow.document;
+        const body = iframeDoc.body;
+        if (body && (body.isContentEditable || body.contentEditable === "true")) {
+          return { element: body, iframe: activeElement, iframeDoc, inIframe: true };
+        }
+      } catch (error) {
+        return { element: document.body, iframe: null, iframeDoc: document, inIframe: false };
       }
     }
-  });
 
-  // FIX CKEditor: Trova iframe CKEditor contenitore
-  function findParentCKEditorIframe() {
-    const iframes = document.querySelectorAll(
-      'iframe.cke_wysiwyg_frame, iframe[class*="cke"]'
-    );
-    for (let iframe of iframes) {
+    const ckIframe = findCkEditorIframe();
+    if (ckIframe) {
       try {
-        const iframeDoc =
-          iframe.contentDocument || iframe.contentWindow.document;
+        const iframeDoc = ckIframe.contentDocument || ckIframe.contentWindow.document;
+        return { element: iframeDoc.body, iframe: ckIframe, iframeDoc, inIframe: true };
+      } catch (error) {
+        // Ignore cross-origin CKEditor frames.
+      }
+    }
+
+    return { element: activeElement || document.body, iframe: null, iframeDoc: document, inIframe: false };
+  }
+
+  function findCkEditorIframe() {
+    const iframes = document.querySelectorAll("iframe.cke_wysiwyg_frame, iframe[class*='cke']");
+    for (const iframe of iframes) {
+      try {
+        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
         if (
           iframeDoc &&
           iframeDoc.body &&
-          (iframeDoc.body.isContentEditable ||
-            iframeDoc.body.contentEditable === "true")
+          (iframeDoc.body.isContentEditable || iframeDoc.body.contentEditable === "true")
         ) {
           return iframe;
         }
-      } catch (e) {
-        // Cross-origin, skip
+      } catch (error) {
+        // Ignore cross-origin frames.
       }
     }
     return null;
   }
 
-  // FIX CKEditor: Ottieni elemento editabile reale (anche dentro iframe)
-  function getActiveEditableElement() {
-    let element = document.activeElement;
+  function getCleanHTML(node) {
+    if (!node) return "";
+    const clone = node.cloneNode(true);
+    clone.querySelectorAll("script, style").forEach((el) => el.remove());
 
-    // Se activeElement è un iframe CKEditor, prendi il body dentro
-    if (element && element.tagName === "IFRAME") {
-      try {
-        const iframeDoc =
-          element.contentDocument || element.contentWindow.document;
-        const body = iframeDoc.body;
-        if (
-          body &&
-          (body.isContentEditable || body.contentEditable === "true")
-        ) {
-          return {
-            element: body,
-            inIframe: true,
-            iframe: element,
-            iframeDoc: iframeDoc,
-          };
+    const allowedTags = new Set([
+      "p",
+      "br",
+      "strong",
+      "em",
+      "b",
+      "i",
+      "u",
+      "h1",
+      "h2",
+      "h3",
+      "h4",
+      "h5",
+      "h6",
+      "ul",
+      "ol",
+      "li",
+      "a",
+      "span",
+      "div",
+      "code",
+      "pre",
+      "blockquote",
+    ]);
+
+    const cleanNode = (current) => {
+      if (current.nodeType !== Node.ELEMENT_NODE) return;
+      const tagName = current.tagName.toLowerCase();
+      if (!allowedTags.has(tagName)) {
+        const span = current.ownerDocument.createElement("span");
+        while (current.firstChild) {
+          span.appendChild(current.firstChild);
         }
-      } catch (e) {
-        console.log("Cannot access iframe:", e);
+        current.parentNode?.replaceChild(span, current);
+        cleanNode(span);
+        return;
       }
-    }
 
-    // Controlla se siamo dentro un iframe CKEditor
-    const parentIframe = findParentCKEditorIframe();
-    if (parentIframe) {
-      try {
-        const iframeDoc =
-          parentIframe.contentDocument || parentIframe.contentWindow.document;
-        const body = iframeDoc.body;
-        if (
-          body &&
-          (body.isContentEditable || body.contentEditable === "true")
-        ) {
-          return {
-            element: body,
-            inIframe: true,
-            iframe: parentIframe,
-            iframeDoc: iframeDoc,
-          };
+      if (tagName === "a") {
+        const href = current.getAttribute("href");
+        const saved = current.getAttribute("data-cke-saved-href");
+        Array.from(current.attributes).forEach((attr) => current.removeAttribute(attr.name));
+        if (saved) {
+          current.setAttribute("href", saved);
+        } else if (href) {
+          current.setAttribute("href", href);
         }
-      } catch (e) {
-        console.log("Cannot access parent iframe:", e);
+      } else {
+        Array.from(current.attributes).forEach((attr) => current.removeAttribute(attr.name));
       }
-    }
 
-    return {
-      element: element,
-      inIframe: false,
-      iframe: null,
-      iframeDoc: document,
+      Array.from(current.childNodes).forEach(cleanNode);
     };
+
+    cleanNode(clone);
+    return clone.innerHTML || "";
   }
 
-  // Funzione per ottenere HTML pulito (rimuove classi, ID e attributi inutili)
-  function getCleanHTML(element) {
-    if (!element) return "";
-
-    // Clone l'elemento per non modificare l'originale
-    const clone = element.cloneNode(true);
-
-    // Rimuovi script e style tags
-    const scripts = clone.querySelectorAll("script, style");
-    scripts.forEach((s) => s.remove());
-
-    // Funzione ricorsiva per pulire gli attributi
-    function cleanAttributes(node) {
-      if (node.nodeType === Node.ELEMENT_NODE) {
-        const tagName = node.tagName.toLowerCase();
-
-        // Tag da mantenere: tag semantici essenziali
-        const allowedTags = [
-          "p",
-          "br",
-          "strong",
-          "em",
-          "b",
-          "i",
-          "u",
-          "h1",
-          "h2",
-          "h3",
-          "h4",
-          "h5",
-          "h6",
-          "ul",
-          "ol",
-          "li",
-          "a",
-          "span",
-          "div",
-          "code",
-          "pre",
-          "blockquote",
-        ];
-
-        if (!allowedTags.includes(tagName)) {
-          // Sostituisci tag non permessi con span
-          const span = node.ownerDocument.createElement("span");
-          while (node.firstChild) {
-            span.appendChild(node.firstChild);
-          }
-          node.parentNode?.replaceChild(span, node);
-          return cleanAttributes(span);
-        }
-
-        // Per i link, mantieni solo href
-        if (tagName === "a") {
-          const href = node.getAttribute("href");
-          const savedHref = node.getAttribute("data-cke-saved-href");
-          Array.from(node.attributes).forEach((attr) =>
-            node.removeAttribute(attr.name)
-          );
-          if (savedHref) {
-            node.setAttribute("href", savedHref);
-          } else if (href) {
-            node.setAttribute("href", href);
-          }
-        } else {
-          // Rimuovi TUTTI gli attributi (class, id, style, data-*, ecc.)
-          Array.from(node.attributes).forEach((attr) =>
-            node.removeAttribute(attr.name)
-          );
-        }
-
-        // Ricorsione sui figli
-        Array.from(node.childNodes).forEach((child) => cleanAttributes(child));
-      }
-    }
-
-    cleanAttributes(clone);
-
-    // Ritorna HTML pulito
-    let cleanedHTML = clone.innerHTML || "";
-
-    return cleanedHTML;
-  }
-
-  // FIX CKEditor: Funzione per ottenere testo anche da iframe (CON HTML PULITO)
   function getTextFromElement(element) {
     if (!element) return "";
-
-    // Textarea/Input standard - restituisci value
     if (element.tagName === "TEXTAREA" || element.tagName === "INPUT") {
       return element.value || "";
     }
 
-    // ContentEditable standard o BODY CKEditor
-    if (
-      element.isContentEditable ||
-      element.contentEditable === "true" ||
-      element.tagName === "BODY"
-    ) {
-      // FIX: Se c'è un range salvato, estrai HTML solo da quel range
-      if (savedRange) {
+    if (element.isContentEditable || element.contentEditable === "true" || element.tagName === "BODY") {
+      if (state.savedRange) {
         try {
-          const container = savedRange.cloneContents();
-          const tempDiv = (element.ownerDocument || document).createElement(
-            "div"
-          );
-          tempDiv.appendChild(container);
-
-          // Pulisci HTML dal range
-          const cleanHTML = getCleanHTML(tempDiv);
-          console.log("HTML pulito dal range:", cleanHTML.substring(0, 100));
-          return cleanHTML;
-        } catch (e) {
-          console.error("Errore estrazione HTML dal range:", e);
+          const fragment = state.savedRange.cloneContents();
+          const temp = (element.ownerDocument || document).createElement("div");
+          temp.appendChild(fragment);
+          return getCleanHTML(temp);
+        } catch (error) {
+          return element.innerHTML || element.textContent || "";
         }
       }
-
-      // Fallback: usa tutto l'elemento, ma pulito
-      const cleanHTML = getCleanHTML(element);
-      console.log("HTML pulito dall'elemento:", cleanHTML.substring(0, 100));
-      return cleanHTML;
+      return getCleanHTML(element);
     }
 
-    // Se l'elemento è un iframe, prova ad accedere al body dentro
     if (element.tagName === "IFRAME") {
       try {
-        const iframeDoc =
-          element.contentDocument || element.contentWindow.document;
-        const body = iframeDoc.body;
-        if (body) {
-          const cleanHTML = getCleanHTML(body);
-          return cleanHTML;
-        }
-      } catch (e) {
-        console.log("Cannot access iframe:", e);
+        const iframeDoc = element.contentDocument || element.contentWindow.document;
+        return getCleanHTML(iframeDoc.body);
+      } catch (error) {
+        return "";
       }
     }
 
-    return "";
+    return element.textContent || "";
   }
 
-  // Widget floating piccolo per selezione
-  function createFloatingWidget() {
-    const widget = document.createElement("div");
-    widget.id = "ollama-floating-widget";
-    widget.innerHTML = `
-      <button class="ollama-widget-btn" title="Ollama AI">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
-          <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          <path d="M8 12h8M12 8v8" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
-        </svg>
-      </button>
-    `;
-
-    widget.style.cssText = `
-      position: absolute; z-index: 999999; display: none;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      border-radius: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); padding: 4px;
-    `;
-
-    widget.querySelector("button").style.cssText = `
-      border: none; background: transparent; color: white; cursor: pointer;
-      width: 32px; height: 32px; display: flex; align-items: center; justify-content: center;
-    `;
-
-    widget.querySelector("button").onclick = () =>
-      openInPageWidget(null, false);
-    document.body.appendChild(widget);
-    return widget;
-  }
-
-  // Helper per verificare se un elemento è editabile
   function isEditableElement(element) {
     if (!element) return false;
-
-    const tagName = element.tagName;
-    if (tagName === "TEXTAREA" || tagName === "INPUT") return true;
-
+    if (element.tagName === "TEXTAREA" || element.tagName === "INPUT") return true;
     if (element.isContentEditable || element.contentEditable === "true") return true;
-
-    if (tagName === "IFRAME") {
+    if (element.tagName === "IFRAME") {
       try {
         const iframeDoc = element.contentDocument || element.contentWindow.document;
-        if (iframeDoc && iframeDoc.body && (iframeDoc.body.isContentEditable || iframeDoc.body.contentEditable === "true")) {
+        if (
+          iframeDoc &&
+          iframeDoc.body &&
+          (iframeDoc.body.isContentEditable || iframeDoc.body.contentEditable === "true")
+        ) {
           return true;
         }
-      } catch (e) {
+      } catch (error) {
         return false;
       }
     }
-
     return false;
   }
+  function handleSelectionChange() {
+    clearTimeout(state.selectionTimeout);
+    state.selectionTimeout = setTimeout(() => captureSelection(true), 40);
+  }
 
-  // Widget in-page completo ELEGANTE E DRAGGABLE
-  function createInPageWidget() {
+  function captureSelection(updateFloatingWidget) {
+    const context = resolveEditableContext();
+    const doc = context.iframeDoc;
+    const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
+    const selectedText = selection ? selection.toString().trim() : "";
+
+    state.lastActiveElement = context.element;
+
+    if (selectedText) {
+      state.lastSelectedText = selectedText;
+      if (context.element && (context.element.tagName === "TEXTAREA" || context.element.tagName === "INPUT")) {
+        state.lastSelectionStart = context.element.selectionStart || 0;
+        state.lastSelectionEnd = context.element.selectionEnd || selectedText.length;
+      } else if (
+        context.element &&
+        (context.element.isContentEditable || context.element.tagName === "BODY") &&
+        selection.rangeCount > 0
+      ) {
+        state.savedRange = selection.getRangeAt(0).cloneRange();
+        state.lastSelectionStart = 0;
+        state.lastSelectionEnd = selectedText.length;
+      }
+    } else {
+      const fallback = getTextFromElement(context.element);
+      state.lastSelectedText = fallback;
+      if (context.element && (context.element.tagName === "TEXTAREA" || context.element.tagName === "INPUT")) {
+        state.lastSelectionStart = 0;
+        state.lastSelectionEnd = fallback.length;
+      } else if (context.element && (context.element.isContentEditable || context.element.tagName === "BODY")) {
+        const range = doc.createRange();
+        range.selectNodeContents(context.element);
+        state.savedRange = range.cloneRange();
+        state.lastSelectionStart = 0;
+        state.lastSelectionEnd = fallback.length;
+      }
+    }
+
+    if (updateFloatingWidget) {
+      maybeShowFloatingWidget(context, selection);
+    }
+
+    return state.lastSelectedText && state.lastSelectedText.trim().length > 0;
+  }
+
+  function ensureGlobalStyles() {
+    if (document.getElementById("ollama-global-styles")) return;
+    const style = document.createElement("style");
+    style.id = "ollama-global-styles";
+    style.textContent = `
+      #ollama-floating-widget {
+        position: absolute;
+        z-index: 2147483647;
+        display: none;
+      }
+      #ollama-floating-widget .ollama-widget-content {
+        background: #ffffff;
+        border-radius: 10px;
+        box-shadow: 0 8px 20px rgba(15, 23, 42, 0.25);
+        padding: 4px;
+      }
+      #ollama-floating-widget .ollama-widget-btn {
+        width: 42px;
+        height: 42px;
+        border: none;
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+        color: #fff;
+        border-radius: 10px;
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.15s ease, box-shadow 0.15s ease;
+      }
+      #ollama-floating-widget .ollama-widget-btn:hover {
+        transform: translateY(-1px);
+        box-shadow: 0 10px 18px rgba(37, 99, 235, 0.35);
+      }
+      #ollama-floating-widget svg {
+        pointer-events: none;
+      }
+    `;
+    document.head.appendChild(style);
+  }
+
+  function ensureFloatingWidget() {
+    if (state.floatingWidget) return state.floatingWidget;
+     ensureGlobalStyles();
+    const widget = document.createElement("div");
+    widget.id = "ollama-floating-widget";
+    widget.className = "ollama-floating-widget";
+    widget.innerHTML = `
+      <div class="ollama-widget-content">
+        <button class="ollama-widget-btn" title="${state.strings.widget.title}">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <circle cx="12" cy="12" r="10"></circle>
+            <line x1="12" y1="8" x2="12" y2="16"></line>
+            <line x1="8" y1="12" x2="16" y2="12"></line>
+          </svg>
+        </button>
+      </div>
+    `;
+    widget.style.position = "absolute";
+    widget.style.zIndex = "2147483647";
+    widget.style.display = "none";
+    widget.querySelector("button").addEventListener("click", () => openWidget(null, false));
+    document.body.appendChild(widget);
+    state.floatingWidget = widget;
+    return widget;
+  }
+
+  function maybeShowFloatingWidget(context, selection) {
+    if (!state.config.showFloatingWidget) {
+      if (state.floatingWidget) state.floatingWidget.style.display = "none";
+      return;
+    }
+
+    if (!isEditableElement(context.element)) {
+      if (state.floatingWidget) state.floatingWidget.style.display = "none";
+      return;
+    }
+
+    if (!selection || selection.rangeCount === 0) {
+      if (state.floatingWidget) state.floatingWidget.style.display = "none";
+      return;
+    }
+
+    const range = selection.getRangeAt(0);
+    const rect = range.getBoundingClientRect();
+    if (!rect || rect.width === 0 || rect.height === 0) {
+      if (state.floatingWidget) state.floatingWidget.style.display = "none";
+      return;
+    }
+
+    const widget = ensureFloatingWidget();
+    let offsetX = 0;
+    let offsetY = 0;
+    if (context.inIframe && context.iframe) {
+      const iframeRect = context.iframe.getBoundingClientRect();
+      offsetX = iframeRect.left;
+      offsetY = iframeRect.top;
+    }
+
+    widget.style.left = `${rect.left + offsetX + rect.width / 2 + window.scrollX - 20}px`;
+    widget.style.top = `${rect.top + offsetY + window.scrollY - 50}px`;
+    widget.style.display = "block";
+
+    setTimeout(() => {
+      if (state.floatingWidget) state.floatingWidget.style.display = "none";
+    }, 5000);
+  }
+  function ensureWidget() {
+    if (state.inPageWidget) return state.inPageWidget;
+    ensureGlobalStyles();
+    if (!state.widgetHost) {
+      state.widgetHost = document.createElement("div");
+      state.widgetHost.id = "ollama-widget-host";
+      state.widgetShadow = state.widgetHost.attachShadow({ mode: "open" });
+      document.body.appendChild(state.widgetHost);
+    } else if (!state.widgetShadow) {
+      state.widgetShadow =
+        state.widgetHost.shadowRoot ||
+        state.widgetHost.attachShadow({ mode: "open" });
+    }
+
+    const shadow = state.widgetShadow;
+    shadow.innerHTML = "";
+
+    const style = document.createElement("style");
+    style.textContent = getInPageWidgetStyles();
+    shadow.appendChild(style);
+
+    const t = state.strings.widget;
     const widget = document.createElement("div");
     widget.id = "ollama-inpage-widget";
     widget.innerHTML = `
       <div class="ollama-widget-header" id="ollama-drag-handle">
         <div class="ollama-header-content">
           <img class="ollama-logo" alt="Ollama Logo" />
-          <h3>Ollama Assistant</h3>
+          <h3>${t.title}</h3>
         </div>
-        <button class="ollama-close-btn">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <button class="ollama-close-btn" title="${t.closeLabel || "Close"}">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2">
             <line x1="18" y1="6" x2="6" y2="18"></line>
             <line x1="6" y1="6" x2="18" y2="18"></line>
           </svg>
@@ -374,986 +565,647 @@
       <div class="ollama-widget-body">
         <div class="ollama-loading hidden">
           <div class="ollama-spinner"></div>
-          <p>Elaborazione in corso...</p>
+          <p class="ollama-loading-text">${t.loading}</p>
         </div>
         <div class="ollama-controls">
-          <label>🎯 Tono:</label>
-          <div class="ollama-tone-buttons" id="ollama-tone-buttons">
-            <button class="ollama-tone-btn" data-tone="formale">Formale</button>
-            <button class="ollama-tone-btn" data-tone="professionale">Professionale</button>
-            <button class="ollama-tone-btn" data-tone="amichevole">Amichevole</button>
-            <button class="ollama-tone-btn" data-tone="casual">Casual</button>
-          </div>
-          <label>💬 Prompt:</label>
-          <textarea id="ollama-prompt-field" placeholder="Inserisci il tuo prompt personalizzato..."></textarea>
+          <label>${t.toneLabel}</label>
+          <div class="ollama-tone-buttons" id="ollama-tone-buttons"></div>
+          <label>${t.promptLabel}</label>
+          <textarea id="ollama-prompt-field" placeholder="${t.customPromptPlaceholder || t.promptPlaceholder}"></textarea>
           <div class="ollama-prompts-grid" id="ollama-prompts"></div>
-          <button class="ollama-ask-btn" id="ollama-ask-btn">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <polyline points="9 18 15 12 9 6"></polyline>
-            </svg>
-            Elabora
-          </button>
+          <button class="ollama-ask-btn" id="ollama-ask-btn">${t.askButton}</button>
         </div>
         <div class="ollama-preview hidden">
-          <label>✨ Risultato:</label>
+          <label>${t.resultLabel}</label>
           <div class="ollama-preview-text" id="ollama-preview-text"></div>
           <div class="ollama-actions">
-            <button class="ollama-btn ollama-accept">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3">
-                <polyline points="20 6 9 17 4 12"></polyline>
-              </svg>
-              Accetta
-            </button>
-            <button class="ollama-btn ollama-modify">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path>
-                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path>
-              </svg>
-              Modifica
-            </button>
-            <button class="ollama-btn ollama-discard">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-              Scarta
-            </button>
+            <button class="ollama-btn ollama-accept">${t.accept}</button>
+            <button class="ollama-btn ollama-modify">${t.modify}</button>
+            <button class="ollama-btn ollama-discard">${t.discard}</button>
           </div>
         </div>
         <div class="ollama-error hidden">
-          <div class="error-icon">⚠️</div>
+          <div class="error-icon">!</div>
           <p id="ollama-error-text"></p>
-          <button class="ollama-btn ollama-retry">Riprova</button>
+          <button class="ollama-btn ollama-retry">${t.retry}</button>
         </div>
       </div>
     `;
 
-    // Set logo src dynamically
-    const logoImg = widget.querySelector('.ollama-logo');
+    widget.style.position = "fixed";
+    widget.style.top = "50%";
+    widget.style.left = "50%";
+    widget.style.transform = "translate(-50%, -50%)";
+    widget.style.zIndex = "2147483647";
+    widget.style.display = "none";
+
+    shadow.appendChild(widget);
+    wireWidgetEvents(widget);
+
+    const logoImg = widget.querySelector(".ollama-logo");
     if (logoImg) {
-      logoImg.src = browser.runtime.getURL('icons/icon-48.png');
+      logoImg.src = browser.runtime.getURL("icons/icon-48.png");
     }
 
-    widget.style.cssText = `
-      position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      z-index: 2147483647; background: white !important; border-radius: 16px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.05);
-      width: 550px; max-height: 85vh; overflow: hidden; display: none;
-      animation: ollama-slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-      color: #1a202c !important;
-    `;
-
-    document.body.appendChild(widget);
-
-    // CSS dinamico ELEGANTE con supporto dark mode
-    if (!document.getElementById("ollama-widget-styles")) {
-      const style = document.createElement("style");
-      style.id = "ollama-widget-styles";
-      style.textContent = `
-        @keyframes ollama-slide-in {
-          from { opacity: 0; transform: translate(-50%, -48%); }
-          to { opacity: 1; transform: translate(-50%, -50%); }
-        }
-        
-        #ollama-inpage-widget {
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
-          color: #1a202c !important;
-          background: white !important;
-        }
-        #ollama-inpage-widget * {
-          box-sizing: border-box;
-        }
-        
-        @media (prefers-color-scheme: dark) {
-          #ollama-inpage-widget { background: #1a202c !important; color: #e2e8f0 !important; }
-          #ollama-inpage-widget #ollama-prompt-field { 
-            background: #2d3748 !important; color: #e2e8f0 !important; 
-            border-color: #4a5568 !important; 
-          }
-          #ollama-inpage-widget .ollama-prompt-btn { 
-            background: #2d3748 !important; color: #e2e8f0 !important; 
-            border-color: #4a5568 !important; 
-          }
-          #ollama-inpage-widget .ollama-prompt-btn:hover { background: #374151 !important; }
-          #ollama-inpage-widget .ollama-prompt-btn.selected { 
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important; 
-          }
-          #ollama-inpage-widget .ollama-preview-text { 
-            background: #2d3748 !important; color: #e2e8f0 !important; 
-            border-color: #4a5568 !important; 
-          }
-          #ollama-inpage-widget .ollama-widget-body label { color: #cbd5e0 !important; }
-          #ollama-inpage-widget .ollama-error { 
-            background: #742a2a !important; color: #feb2b2 !important; 
-            border-color: #fc8181 !important; 
-          }
-        }
-        
-        .ollama-widget-header {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          color: white; padding: 20px 24px;
-          display: flex; justify-content: space-between; align-items: center;
-          cursor: grab;
-          user-select: none;
-        }
-
-        .ollama-widget-header:active {
-          cursor: grabbing;
-        }
-
-        .ollama-header-content { display: flex; align-items: center; gap: 12px; }
-        .ollama-logo { width: 32px; height: 32px; border-radius: 6px; }
-        .ollama-widget-header h3 { margin: 0; font-size: 20px; font-weight: 600; color: #ffffffff; }
-
-        .ollama-close-btn {
-          background: transparent !important; border: none !important; color: white !important;
-          width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
-          display: flex; align-items: center; justify-content: center;
-          transition: all 0.2s;
-        }
-        .ollama-close-btn:hover {
-          background: rgba(255,255,255,0.1) !important;
-          transform: scale(1.15);
-        }
-        .ollama-close-btn svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)) !important; }
-
-        .ollama-widget-body {
-          padding: 24px; max-height: calc(85vh - 72px); overflow-y: auto;
-          background: #575757ff !important;
-        }
-        .ollama-widget-body label {
-          display: block; font-weight: 600; margin-bottom: 10px;
-          font-size: 14px; color: #4a5568;
-        }
-
-        .ollama-tone-buttons {
-          display: grid; grid-template-columns: 1fr 1fr;
-          gap: 8px; margin-bottom: 16px;
-        }
-        .ollama-tone-btn {
-          padding: 10px 12px; background: white !important;
-          border: 2px solid #cbd5e0; border-radius: 8px; cursor: pointer;
-          font-size: 13px; font-weight: 500; color: #2d3748 !important;
-          transition: all 0.2s;
-        }
-        .ollama-tone-btn:hover {
-          background: #edf2f7 !important; border-color: #4299e1;
-          transform: translateY(-1px);
-        }
-        .ollama-tone-btn.selected {
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
-          color: white !important; border-color: transparent; font-weight: 600;
-        }
-
-        #ollama-prompt-field {
-          width: 100%; min-height: 90px; padding: 12px 16px;
-          border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px;
-          resize: vertical; margin-bottom: 16px; font-family: inherit;
-          transition: all 0.2s;
-          background: white !important;
-          color: #797979ff !important;
-        }
-        #ollama-prompt-field:focus {
-          outline: none; border-color: #667eea;
-          box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
-        }
-
-        .ollama-prompts-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 16px; }
-
-        .ollama-prompt-btn {
-          padding: 12px 16px; background: white !important; border: 2px solid #e2e8f0;
-          border-radius: 10px; cursor: pointer; text-align: left; font-size: 14px;
-          transition: all 0.2s; font-weight: 500; color: #2d3748 !important;
-          position: relative; overflow: hidden;
-        }
-        .ollama-prompt-btn::before {
-          content: ''; position: absolute; top: 0; left: 0; right: 0; bottom: 0;
-          background: linear-gradient(135deg, rgba(102,126,234,0.05) 0%, rgba(118,75,162,0.05) 100%);
-          opacity: 0; transition: opacity 0.2s;
-        }
-        .ollama-prompt-btn:hover::before { opacity: 1; }
-        .ollama-prompt-btn:hover { border-color: #667eea; transform: translateX(4px); }
-        .ollama-prompt-btn.selected { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          color: white; border-color: transparent; font-weight: 600;
-        }
-        
-        .ollama-ask-btn { 
-          width: 100%; padding: 14px 20px; 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          color: white; border: none; border-radius: 10px; font-weight: 600; 
-          cursor: pointer; font-size: 15px; display: flex; align-items: center; 
-          justify-content: center; gap: 8px; transition: all 0.2s;
-          box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
-        }
-        .ollama-ask-btn:hover { 
-          transform: translateY(-2px); 
-          box-shadow: 0 6px 20px rgba(102, 126, 234, 0.4);
-        }
-        .ollama-ask-btn:active { transform: translateY(0); }
-        
-        .ollama-preview-text {
-          background: #f7fafc !important; border: 2px solid #e2e8f0; padding: 16px;
-          border-radius: 10px; margin-bottom: 16px; white-space: pre-wrap;
-          max-height: 320px; overflow-y: auto; font-size: 14px; line-height: 1.7;
-          color: #2d3748 !important;
-        }
-        
-        .ollama-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
-        
-        .ollama-btn { 
-          padding: 12px 16px; border: none; border-radius: 10px; font-weight: 600; 
-          cursor: pointer; font-size: 14px; display: flex; align-items: center; 
-          justify-content: center; gap: 6px; transition: all 0.2s;
-        }
-        .ollama-btn:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
-        .ollama-btn:active { transform: translateY(0); }
-        
-        .ollama-accept { background: linear-gradient(135deg, #48bb78 0%, #38a169 100%); color: white; }
-        .ollama-modify { background: linear-gradient(135deg, #667eea 0%, #5a67d8 100%); color: white; }
-        .ollama-discard { background: linear-gradient(135deg, #f56565 0%, #e53e3e 100%); color: white; }
-        .ollama-retry { 
-          width: 100%; margin-top: 12px; 
-          background: linear-gradient(135deg, #718096 0%, #4a5568 100%); 
-          color: white; 
-        }
-        
-        .ollama-loading { text-align: center; padding: 50px 20px; }
-        .ollama-spinner { 
-          width: 50px; height: 50px; margin: 0 auto 20px; 
-          border: 4px solid #e2e8f0; border-top-color: #667eea; 
-          border-radius: 50%; animation: ollama-spin 0.8s linear infinite; 
-        }
-        @keyframes ollama-spin { to { transform: rotate(360deg); } }
-        .ollama-loading p { color: #718096; font-size: 14px; font-weight: 500; }
-        
-        .ollama-error { 
-          background: #fff5f5; border: 2px solid #fc8181; padding: 20px; 
-          border-radius: 10px; color: #c53030; font-size: 14px; line-height: 1.6;
-          text-align: center;
-        }
-        .error-icon { font-size: 32px; margin-bottom: 12px; }
-        
-        .hidden { display: none !important; }
-        
-        /* Scrollbar personalizzata */
-        #ollama-inpage-widget ::-webkit-scrollbar { width: 8px; }
-        #ollama-inpage-widget ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 10px; }
-        #ollama-inpage-widget ::-webkit-scrollbar-thumb { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          border-radius: 10px; 
-        }
-        #ollama-inpage-widget ::-webkit-scrollbar-thumb:hover { background: #5a67d8; }
-      `;
-      document.head.appendChild(style);
-    }
-
-    // Event listeners
-    widget.querySelector(".ollama-close-btn").onclick = () => closeWidget();
-    widget.querySelector("#ollama-ask-btn").onclick = () => handleAsk();
-    widget.querySelector(".ollama-accept").onclick = () => handleAccept();
-    widget.querySelector(".ollama-discard").onclick = () => closeWidget();
-    widget.querySelector(".ollama-modify").onclick = () => handleModify();
-    widget.querySelector(".ollama-retry").onclick = () => {
-      widget.querySelector(".ollama-error").classList.add("hidden");
-      widget.querySelector(".ollama-controls").classList.remove("hidden");
-    };
-
-    // Draggable logic
-    const dragHandle = widget.querySelector("#ollama-drag-handle");
-
-    dragHandle.addEventListener("mousedown", (e) => {
-      if (e.target.closest(".ollama-close-btn")) return;
-
-      isDragging = true;
-      dragStartX = e.clientX;
-      dragStartY = e.clientY;
-
-      const rect = widget.getBoundingClientRect();
-      widgetStartX = rect.left;
-      widgetStartY = rect.top;
-
-      dragHandle.style.cursor = "grabbing";
-      widget.style.transition = "none";
-
-      e.preventDefault();
-    });
-
-    document.addEventListener("mousemove", (e) => {
-      if (!isDragging) return;
-
-      const deltaX = e.clientX - dragStartX;
-      const deltaY = e.clientY - dragStartY;
-
-      const newX = widgetStartX + deltaX;
-      const newY = widgetStartY + deltaY;
-
-      widget.style.left = newX + "px";
-      widget.style.top = newY + "px";
-      widget.style.transform = "none";
-    });
-
-    document.addEventListener("mouseup", () => {
-      if (isDragging) {
-        isDragging = false;
-        dragHandle.style.cursor = "grab";
-      }
-    });
-
+    state.inPageWidget = widget;
     return widget;
   }
+  function getInPageWidgetStyles() {
+    return `
+      #ollama-inpage-widget,
+      #ollama-inpage-widget * {
+        box-sizing: border-box;
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      #ollama-inpage-widget h3 {
+        margin: 0;
+        font-size: 20px;
+        font-weight: 600;
+        color: #fff;
+      }
+      #ollama-inpage-widget label {
+        color: #1f2933;
+        font-weight: 600;
+        margin-bottom: 10px;
+        display: block;
+      }
+      #ollama-inpage-widget {
+        width: 520px;
+        max-height: 85vh;
+        background: #ffffff;
+        border-radius: 18px;
+        box-shadow: 0 25px 70px rgba(15, 23, 42, 0.35);
+      }
+      .ollama-widget-header {
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+        color: #fff;
+        padding: 18px 24px;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        cursor: grab;
+        user-select: none;
+      }
+      .ollama-header-content {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .ollama-logo {
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+      }
+      .ollama-close-btn {
+        border: none;
+        background: transparent;
+        color: #fff;
+        cursor: pointer;
+        width: 32px;
+        height: 32px;
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        transition: background 0.2s ease;
+      }
+      .ollama-close-btn:hover {
+        background: rgba(255, 255, 255, 0.18);
+      }
+      .ollama-widget-body {
+        padding: 24px;
+        max-height: calc(85vh - 72px);
+        overflow-y: auto;
+        background: #f8fafc;
+      }
+      .ollama-tone-buttons {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .ollama-tone-btn,
+      .ollama-prompt-btn {
+        border: 2px solid #d9e2ec;
+        border-radius: 10px;
+        padding: 10px 12px;
+        background: #f8fafc;
+        cursor: pointer;
+        font-weight: 500;
+        color: #1f2933;
+        transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      .ollama-tone-btn:not(.selected),
+      .ollama-prompt-btn:not(.selected) {
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8);
+      }
+      .ollama-tone-btn:hover:not(.selected),
+      .ollama-prompt-btn:hover:not(.selected) {
+        background: #edf2ff;
+        border-color: #a3bffa;
+      }
+      .ollama-tone-btn.selected,
+      .ollama-prompt-btn.selected {
+        background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+        color: #fff;
+        border-color: transparent;
+        box-shadow: 0 10px 24px rgba(37, 99, 235, 0.35);
+      }
+      #ollama-prompt-field {
+        width: 100%;
+        min-height: 90px;
+        padding: 12px 16px;
+        border: 2px solid #d9e2ec;
+        border-radius: 12px;
+        margin-bottom: 16px;
+        resize: vertical;
+        font-size: 14px;
+        background: #fff;
+      }
+      .ollama-prompts-grid {
+        display: grid;
+        grid-template-columns: 1fr;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .ollama-ask-btn {
+        width: 100%;
+        padding: 14px 20px;
+        border: none;
+        border-radius: 12px;
+        background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+        color: #fff;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: box-shadow 0.2s ease, transform 0.2s ease;
+      }
+      .ollama-ask-btn:hover {
+        box-shadow: 0 12px 24px rgba(16, 185, 129, 0.35);
+        transform: translateY(-1px);
+      }
+      .ollama-loading,
+      .ollama-preview,
+      .ollama-error {
+        margin-top: 20px;
+      }
+      .ollama-spinner {
+        width: 50px;
+        height: 50px;
+        border: 4px solid #d9e2ec;
+        border-top-color: #2563eb;
+        border-radius: 50%;
+        animation: ollama-spin 0.8s linear infinite;
+        margin: 0 auto 16px;
+      }
+      @keyframes ollama-spin {
+        to { transform: rotate(360deg); }
+      }
+      .ollama-preview-text {
+        border: 2px solid #d9e2ec;
+        border-radius: 12px;
+        padding: 16px;
+        max-height: 320px;
+        overflow-y: auto;
+        white-space: pre-wrap;
+        background: #fff;
+      }
+      .ollama-actions {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-top: 16px;
+      }
+      .ollama-btn {
+        border: none;
+        border-radius: 12px;
+        padding: 12px 16px;
+        cursor: pointer;
+        font-weight: 600;
+      }
+      .ollama-accept { background: linear-gradient(135deg, #22c55e 0%, #16a34a 100%); color: #fff; }
+      .ollama-modify { background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%); color: #fff; }
+      .ollama-discard { background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: #fff; }
+      .ollama-retry {
+        background: linear-gradient(135deg, #475569 0%, #1e293b 100%);
+        color: #fff;
+        width: 100%;
+      }
+      .ollama-error {
+        border: 2px solid #fecaca;
+        border-radius: 12px;
+        padding: 20px;
+        background: #fff5f5;
+        text-align: center;
+      }
+      .ollama-error .error-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 2px solid #ef4444;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        margin-bottom: 12px;
+        font-weight: 700;
+        color: #ef4444;
+      }
+      .hidden { display: none !important; }
+    `;
+  }
+  function wireWidgetEvents(widget) {
+    const dragHandle = widget.querySelector("#ollama-drag-handle");
+    dragHandle.addEventListener("mousedown", (event) => {
+      if (event.target.closest(".ollama-close-btn")) return;
+      state.isDragging = true;
+      state.dragStart = { x: event.clientX, y: event.clientY };
+      const rect = widget.getBoundingClientRect();
+      state.widgetStart = { x: rect.left, y: rect.top };
+      dragHandle.style.cursor = "grabbing";
+      state.currentDragHandle = dragHandle;
+      widget.style.transition = "none";
+      event.preventDefault();
+    });
 
-  function openInPageWidget(selectedPrompt, isCustom) {
-    // Previeni apertura multipla - se il widget è già visibile, non fare nulla
-    if (inPageWidget && inPageWidget.style.display === "block") {
-      console.log("Widget già aperto, ignoro apertura multipla");
+    widget.querySelector(".ollama-close-btn").addEventListener("click", closeWidget);
+    widget.querySelector("#ollama-ask-btn").addEventListener("click", handleAskFromWidget);
+    widget.querySelector(".ollama-accept").addEventListener("click", handleAcceptFromWidget);
+    widget.querySelector(".ollama-discard").addEventListener("click", closeWidget);
+    widget.querySelector(".ollama-modify").addEventListener("click", () => {
+      widget.querySelector(".ollama-preview").classList.add("hidden");
+      widget.querySelector(".ollama-controls").classList.remove("hidden");
+      const promptField = widget.querySelector("#ollama-prompt-field");
+      if (promptField) {
+        promptField.placeholder =
+          state.strings.widget.modifyPlaceholder ||
+          state.strings.widget.customPromptPlaceholder ||
+          state.strings.widget.promptPlaceholder;
+        promptField.focus();
+      }
+    });
+    widget.querySelector(".ollama-retry").addEventListener("click", () => {
+      widget.querySelector(".ollama-error").classList.add("hidden");
+      widget.querySelector(".ollama-controls").classList.remove("hidden");
+      const promptField = widget.querySelector("#ollama-prompt-field");
+      if (promptField) {
+        promptField.placeholder =
+          state.strings.widget.customPromptPlaceholder ||
+          state.strings.widget.promptPlaceholder;
+      }
+    });
+  }
+
+  function handleWidgetDragMove(event) {
+    if (!state.isDragging || !state.inPageWidget) return;
+    const deltaX = event.clientX - state.dragStart.x;
+    const deltaY = event.clientY - state.dragStart.y;
+    state.inPageWidget.style.left = `${state.widgetStart.x + deltaX}px`;
+    state.inPageWidget.style.top = `${state.widgetStart.y + deltaY}px`;
+    state.inPageWidget.style.transform = "none";
+  }
+
+  function handleWidgetDragEnd() {
+    if (!state.isDragging) return;
+    state.isDragging = false;
+    if (state.currentDragHandle) {
+      state.currentDragHandle.style.cursor = "grab";
+      state.currentDragHandle = null;
+    }
+  }
+
+  function renderToneButtons() {
+    if (!state.inPageWidget) return;
+    const container = state.inPageWidget.querySelector("#ollama-tone-buttons");
+    if (!container) return;
+    container.innerHTML = "";
+    (state.strings.tones || []).forEach((tone) => {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "ollama-tone-btn";
+      button.dataset.tone = tone.value;
+      button.textContent = tone.label;
+      if (tone.value === state.selectedTone) {
+        button.classList.add("selected");
+      }
+      button.addEventListener("click", () => {
+        state.selectedTone = tone.value;
+        renderToneButtons();
+      });
+      container.appendChild(button);
+    });
+  }
+
+  function renderPromptButtons(selectedPrompt) {
+    if (!state.inPageWidget) return;
+    const container = state.inPageWidget.querySelector("#ollama-prompts");
+    container.innerHTML = "";
+    state.config.defaultPrompts.forEach((prompt) => {
+      const button = document.createElement("button");
+      button.className = "ollama-prompt-btn";
+      button.textContent = prompt;
+      if (prompt === selectedPrompt) button.classList.add("selected");
+      button.addEventListener("click", () => {
+        container.querySelectorAll(".ollama-prompt-btn").forEach((btn) => btn.classList.remove("selected"));
+        button.classList.add("selected");
+        state.inPageWidget.querySelector("#ollama-prompt-field").value = "";
+      });
+      container.appendChild(button);
+    });
+  }
+
+
+  function openWidget(selectedPrompt, isCustomPrompt) {
+    if (!captureSelection(false)) {
+      alert(state.strings.widget.selectTextAlert);
       return;
     }
 
-    if (!inPageWidget) {
-      inPageWidget = createInPageWidget();
+    const widget = ensureWidget();
+    widget.style.display = "block";
+    widget.querySelector(".ollama-controls").classList.remove("hidden");
+    widget.querySelector(".ollama-loading").classList.add("hidden");
+    widget.querySelector(".ollama-preview").classList.add("hidden");
+    widget.querySelector(".ollama-error").classList.add("hidden");
+    const promptField = widget.querySelector("#ollama-prompt-field");
+    if (promptField) {
+      promptField.value = "";
+      promptField.placeholder =
+        state.strings.widget.customPromptPlaceholder ||
+        state.strings.widget.promptPlaceholder;
     }
+    widget.querySelector("#ollama-ask-btn").textContent =
+      state.strings.widget.askButton;
 
-    // Inizializza bottoni tono
-    const toneButtons = inPageWidget.querySelectorAll(".ollama-tone-btn");
-    toneButtons.forEach((btn) => {
-      btn.classList.remove("selected");
-      if (btn.dataset.tone === selectedTone) {
-        btn.classList.add("selected");
-      }
-      btn.onclick = () => {
-        toneButtons.forEach((b) => b.classList.remove("selected"));
-        btn.classList.add("selected");
-        selectedTone = btn.dataset.tone;
-      };
-    });
+    renderToneButtons();
+    renderPromptButtons(selectedPrompt);
 
-    // Popola prompt
-    const promptsContainer = inPageWidget.querySelector("#ollama-prompts");
-    promptsContainer.innerHTML = "";
-    defaultPrompts.forEach((prompt) => {
-      const btn = document.createElement("button");
-      btn.className = "ollama-prompt-btn";
-      btn.textContent = prompt;
-      if (prompt === selectedPrompt) btn.classList.add("selected");
-      btn.onclick = () => {
-        inPageWidget
-          .querySelectorAll(".ollama-prompt-btn")
-          .forEach((b) => b.classList.remove("selected"));
-        btn.classList.add("selected");
-        inPageWidget.querySelector("#ollama-prompt-field").value = "";
-      };
-      promptsContainer.appendChild(btn);
-    });
-
-    // Reset UI
-    inPageWidget.querySelector(".ollama-controls").classList.remove("hidden");
-    inPageWidget.querySelector(".ollama-loading").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-preview").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-error").classList.add("hidden");
-    inPageWidget.querySelector("#ollama-prompt-field").value = "";
-    inPageWidget.querySelector("#ollama-prompt-field").placeholder =
-      "Inserisci il tuo prompt personalizzato...";
-
-    if (isCustom) {
-      setTimeout(
-        () => inPageWidget.querySelector("#ollama-prompt-field").focus(),
-        100
-      );
-    }
-
-    inPageWidget.style.display = "block";
-
-    // Auto-esegui se prompt selezionato
-    if (selectedPrompt && !isCustom) {
-      setTimeout(() => handleAsk(), 300);
+    if (selectedPrompt && !isCustomPrompt) {
+      setTimeout(handleAskFromWidget, 200);
+    } else if (isCustomPrompt) {
+      setTimeout(() => widget.querySelector("#ollama-prompt-field").focus(), 150);
     }
   }
 
   function closeWidget() {
-    if (inPageWidget) inPageWidget.style.display = "none";
-    conversationHistory = [];
+    if (!state.inPageWidget) return;
+    state.inPageWidget.style.display = "none";
+    state.conversationHistory = [];
+    state.isDragging = false;
+    state.currentDragHandle = null;
   }
-
-  async function handleAsk() {
-    const promptField = inPageWidget.querySelector("#ollama-prompt-field");
-    const selectedBtn = inPageWidget.querySelector(
-      ".ollama-prompt-btn.selected"
-    );
-    const prompt =
-      promptField.value.trim() || (selectedBtn ? selectedBtn.textContent : "");
+  function handleAskFromWidget() {
+    if (!state.inPageWidget) return;
+    const promptField = state.inPageWidget.querySelector("#ollama-prompt-field");
+    const selectedBtn = state.inPageWidget.querySelector(".ollama-prompt-btn.selected");
+    const prompt = promptField.value.trim() || (selectedBtn ? selectedBtn.textContent : "");
 
     if (!prompt) {
-      showError("Seleziona un prompt predefinito o scrivi il tuo!");
+      showError(state.strings.widget.selectPromptError);
+      return;
+    }
+
+    if (!state.lastSelectedText) {
+      showError(state.strings.widget.noTextError);
       return;
     }
 
     showLoading();
-
-    // Rileva se è HTML
-    const isHTML =
-      lastSelectedText.includes("<") && lastSelectedText.includes(">");
-
-    let systemPrompt;
-    let userMessage;
-
-    if (isHTML) {
-      systemPrompt = `You are an HTML content editor. You MUST preserve ALL HTML tags and structure.
-Your task: modify ONLY the text content inside the tags, keep ALL tags exactly as they are.
-
-Rules:
-- Keep ALL HTML tags: <p>, <h1>, <h2>, <h3>, <br>, <strong>, <em>, <a>, <ul>, <li>, etc.
-- Do NOT translate or modify tag names
-- Do NOT remove or add tags
-- Modify ONLY the text between tags
-- Return valid HTML without wrapping it in code blocks or quotes
-
-Example:
-Input: <h2>Hello World</h2><p>This is <strong>bold</strong> text</p>
-Task: Translate to Spanish
-Output: <h2>Hola Mundo</h2><p>Este es texto en <strong>negrita</strong></p>`;
-
-      userMessage = `HTML Content:
-${lastSelectedText}
-
-Task: ${prompt}
-Tone: Use a ${selectedTone} tone.
-
-Return ONLY the modified HTML with preserved structure:`;
-    } else {
-      systemPrompt = `Rispondi ESCLUSIVAMENTE con il testo richiesto, senza aggiungere virgolette, apici, quote o altri caratteri di formattazione attorno al testo. Mantieni ESATTAMENTE la stessa formattazione, struttura, a capo, spaziatura e stile del testo originale. Non aggiungere emoji, simboli strani o caratteri decorativi. Preserva tutti gli "a capo" (\\n), spazi, indentazioni e punteggiatura originali. Non racchiudere mai la risposta tra virgolette.`;
-
-      userMessage = `Testo originale:\n${lastSelectedText}\n\nRichiesta: ${prompt}\n\nTono: Usa un tono ${selectedTone}.\n\nRitorna SOLO il testo modificato mantenendo la formattazione identica all'originale, SENZA virgolette attorno.`;
-    }
-
-    const messages = [
-      { role: "system", content: systemPrompt },
-      ...conversationHistory,
-      { role: "user", content: userMessage },
-    ];
-
-    try {
-      const response = await browser.runtime.sendMessage({
-        type: "OLLAMA_REQUEST",
-        url: `${ollamaUrl}/api/chat`,
-        body: { model: defaultModel, stream: false, messages },
+    requestOllama(prompt)
+      .then((message) => showPreview(message))
+      .catch((error) => {
+        const packErrors = state.strings.popup?.errors;
+        const message =
+          packErrors?.ollama && error?.message
+            ? packErrors.ollama(
+                state.config.ollamaUrl,
+                state.config.defaultModel,
+                error.message
+              )
+            : error?.message || packErrors?.connectionFailed || "Ollama request failed. Check your connection.";
+        showError(message);
       });
-
-      if (!response.success) throw new Error(response.error);
-
-      let aiResponse = response.data.message.content;
-
-      // Rimuovi markdown code blocks e virgolette
-      aiResponse = aiResponse
-        .replace(/^```html\n?/g, "")
-        .replace(/^``````$/g, "")
-        .trim();
-      aiResponse = aiResponse.replace(/^["']|["']$/g, "").trim();
-
-      // Se la risposta non contiene HTML ma dovrebbe, mostra errore
-      if (isHTML && (!aiResponse.includes("<") || !aiResponse.includes(">"))) {
-        console.warn(
-          "L'AI ha restituito testo senza HTML, ma era richiesto HTML"
-        );
-        showError(
-          'L\'AI ha rimosso i tag HTML. Riprova o usa un prompt diverso.\n\nSuggerimento: specifica "mantieni la formattazione HTML" nel prompt.'
-        );
-        return;
-      }
-
-      conversationHistory.push({ role: "user", content: userMessage });
-      conversationHistory.push({ role: "assistant", content: aiResponse });
-
-      showPreview(aiResponse);
-    } catch (error) {
-      showError(
-        `Errore: ${error.message}\n\nVerifica che Ollama sia attivo su ${ollamaUrl}`
-      );
-    }
   }
 
   function showLoading() {
-    inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-preview").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-error").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-loading").classList.remove("hidden");
+    if (!state.inPageWidget) return;
+    state.inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-preview").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-error").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-loading").classList.remove("hidden");
   }
 
-  function showPreview(text) {
-    inPageWidget.querySelector(".ollama-loading").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-error").classList.add("hidden");
-
-    const previewElement = inPageWidget.querySelector("#ollama-preview-text");
-
-    // FIX: Se il testo contiene HTML, mostralo come HTML
-    if (text.includes("<") && text.includes(">")) {
-      previewElement.innerHTML = text;
+  function showPreview(content) {
+    if (!state.inPageWidget) return;
+    const preview = state.inPageWidget.querySelector("#ollama-preview-text");
+    if (/<[a-z][\s\S]*>/i.test(content)) {
+      preview.innerHTML = content;
     } else {
-      previewElement.textContent = text;
+      preview.textContent = content;
+    }
+    state.inPageWidget.querySelector(".ollama-loading").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-error").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-preview").classList.remove("hidden");
+  }
+
+  function showError(message) {
+    if (!state.inPageWidget) return;
+    state.inPageWidget.querySelector(".ollama-loading").classList.add("hidden");
+    state.inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
+    const container = state.inPageWidget.querySelector(".ollama-error");
+    container.querySelector("#ollama-error-text").textContent = message;
+    container.classList.remove("hidden");
+  }
+
+  async function requestOllama(prompt) {
+    const containsHtml = /<\/?[a-z][\s\S]*>/i.test(state.lastSelectedText);
+    const toneText =
+      state.strings.toneMentions?.[state.selectedTone] || state.selectedTone;
+    const systemPrompt = containsHtml
+      ? state.strings.ai.htmlSystem
+      : state.strings.ai.plainSystem;
+    const template = containsHtml
+      ? state.strings.ai.htmlUserTemplate
+      : state.strings.ai.plainUserTemplate;
+    const userPrompt = formatTemplate(template, {
+      text: state.lastSelectedText,
+      prompt,
+      tone: toneText,
+    });
+
+    const messages = [
+      { role: "system", content: systemPrompt },
+      ...state.conversationHistory,
+      { role: "user", content: userPrompt },
+    ];
+
+    const response = await browser.runtime.sendMessage({
+      type: "OLLAMA_REQUEST",
+      url: `${state.config.ollamaUrl}/api/chat`,
+      body: {
+        model: state.config.defaultModel,
+        stream: false,
+        messages,
+      },
+    });
+
+    if (!response.success) {
+      throw new Error(response.error || "Unknown error");
     }
 
-    inPageWidget.querySelector(".ollama-preview").classList.remove("hidden");
-  }
-
-  function showError(msg) {
-    inPageWidget.querySelector(".ollama-loading").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-preview").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-controls").classList.add("hidden");
-    inPageWidget.querySelector("#ollama-error-text").textContent = msg;
-    inPageWidget.querySelector(".ollama-error").classList.remove("hidden");
-  }
-
-  function handleAccept() {
-    const previewElement = inPageWidget.querySelector("#ollama-preview-text");
-
-    // FIX: Prendi innerHTML se contiene HTML, altrimenti textContent
-    let text;
-    if (
-      previewElement.innerHTML.includes("<") &&
-      previewElement.innerHTML.includes(">")
-    ) {
-      text = previewElement.innerHTML;
-    } else {
-      text = previewElement.textContent;
+    let message = response.data?.message?.content;
+    if (!message) {
+      throw new Error(state.strings.widget.emptyResponse || "Empty response from Ollama");
     }
 
-    console.log("Accettazione testo (con HTML se presente)");
-    replaceTextInElement(text);
+    message = message.replace(/^```[a-z]*\n?/gi, "").replace(/```$/gi, "").trim();
+    message = message.replace(/^['"]|['"]$/g, "").trim();
+
+    if (containsHtml && !/<\/?[a-z]/i.test(message)) {
+      throw new Error(state.strings.widget.htmlMissing);
+    }
+
+    state.conversationHistory.push({ role: "user", content: userPrompt });
+    state.conversationHistory.push({ role: "assistant", content: message });
+
+    return message;
+  }
+  function handleAcceptFromWidget() {
+    if (!state.inPageWidget) return;
+    const preview = state.inPageWidget.querySelector("#ollama-preview-text");
+    const html = preview.innerHTML.trim();
+    const text = preview.textContent.trim();
+    const hasHtml = /<\/?[a-z]/i.test(html);
+    replaceTextInElement(hasHtml ? html : text);
     closeWidget();
   }
 
-  function handleModify() {
-    inPageWidget.querySelector(".ollama-preview").classList.add("hidden");
-    inPageWidget.querySelector(".ollama-controls").classList.remove("hidden");
-    inPageWidget.querySelector("#ollama-prompt-field").value = "";
-    inPageWidget.querySelector("#ollama-prompt-field").placeholder =
-      "Descrivi la modifica desiderata...";
-    inPageWidget
-      .querySelectorAll(".ollama-prompt-btn")
-      .forEach((b) => b.classList.remove("selected"));
-  }
-
   function replaceTextInElement(newText) {
-  if (!lastActiveElement) {
-    console.error('Nessun elemento attivo salvato');
-    showError('Errore: impossibile sostituire il testo. Elemento non trovato.');
-    return;
-  }
-  
-  console.log('Inizio sostituzione testo');
-  console.log('Elemento:', lastActiveElement.tagName);
-  console.log('Testo contiene HTML:', newText.includes('<'));
-  
-  // Determina il documento (principale o iframe)
-  let doc = document;
-  if (lastActiveElement.ownerDocument) {
-    doc = lastActiveElement.ownerDocument;
-  }
-  
-  try {
-    // TEXTAREA o INPUT
-    if (lastActiveElement.tagName === 'TEXTAREA' || lastActiveElement.tagName === 'INPUT') {
-      console.log('Sostituzione in TEXTAREA/INPUT');
-      
-      const fullValue = lastActiveElement.value;
-      const before = fullValue.substring(0, lastSelectionStart);
-      const after = fullValue.substring(lastSelectionEnd);
-      
-      lastActiveElement.value = before + newText + after;
-      
-      const newPosition = lastSelectionStart + newText.length;
-      lastActiveElement.setSelectionRange(newPosition, newPosition);
-      
-      lastActiveElement.dispatchEvent(new Event('input', { bubbles: true }));
-      lastActiveElement.dispatchEvent(new Event('change', { bubbles: true }));
-      lastActiveElement.focus();
-      
-      console.log('Sostituzione completata in textarea/input');
+    if (!state.lastActiveElement) {
+      alert(state.strings.widget.insertError);
       return;
     }
-    
-    // CONTENTEDITABLE o BODY (CKEditor)
-    if (lastActiveElement.isContentEditable || lastActiveElement.contentEditable === 'true' || lastActiveElement.tagName === 'BODY') {
-      console.log('Sostituzione in CONTENTEDITABLE/CKEditor BODY');
-      
-      lastActiveElement.focus();
-      
-      // USA SEMPRE il range salvato
-      if (savedRange) {
-        console.log('Uso range salvato per sostituzione precisa');
-        const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(savedRange);
-        
-        // Elimina contenuto selezionato
-        savedRange.deleteContents();
-        
-        // FIX: Se il testo contiene HTML, inserisci come HTML
-        if (newText.includes('<') && newText.includes('>')) {
-          console.log('Inserimento HTML nel range');
-          
-          // Crea elemento temporaneo per parsare HTML
-          const tempDiv = doc.createElement('div');
-          tempDiv.innerHTML = newText;
-          
-          // Inserisci tutti i nodi uno per uno nell'ordine corretto
-          const nodes = Array.from(tempDiv.childNodes);
-          let lastNode = null;
-          
-          nodes.forEach((node, index) => {
-            const clonedNode = node.cloneNode(true);
-            savedRange.insertNode(clonedNode);
-            lastNode = clonedNode;
-            
-            // Sposta il range dopo il nodo appena inserito
-            if (index < nodes.length - 1) {
-              savedRange.setStartAfter(clonedNode);
-              savedRange.collapse(true);
-            }
-          });
-          
-          // Posiziona cursore alla fine
-          if (lastNode) {
-            savedRange.setStartAfter(lastNode);
-            savedRange.collapse(true);
-          }
-        } else {
-          // Testo semplice
-          console.log('Inserimento testo semplice nel range');
-          const lines = newText.split('\n');
-          lines.forEach((line, index) => {
-            const textNode = doc.createTextNode(line);
-            savedRange.insertNode(textNode);
-            
-            if (index < lines.length - 1) {
-              const br = doc.createElement('br');
-              savedRange.insertNode(br);
-              savedRange.setStartAfter(br);
-            } else {
-              savedRange.setStartAfter(textNode);
-            }
-          });
-          
-          savedRange.collapse(false);
-        }
-        
-        selection.removeAllRanges();
-        selection.addRange(savedRange);
-      } else {
-        // Se non c'è range salvato, crea selezione per tutto il contenuto
-        console.warn('Nessun range salvato! Creo selezione per tutto il contenuto editabile');
-        
-        const range = doc.createRange();
-        range.selectNodeContents(lastActiveElement);
-        
-        const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
-        selection.removeAllRanges();
-        selection.addRange(range);
-        
-        range.deleteContents();
-        
-        // Inserisci nuovo contenuto
-        if (newText.includes('<') && newText.includes('>')) {
-          const tempDiv = doc.createElement('div');
-          tempDiv.innerHTML = newText;
-          
-          const nodes = Array.from(tempDiv.childNodes);
-          
-          nodes.forEach((node, index) => {
-            const clonedNode = node.cloneNode(true);
-            range.insertNode(clonedNode);
-            
-            if (index < nodes.length - 1) {
-              range.setStartAfter(clonedNode);
-              range.collapse(true);
-            }
-          });
-        } else {
-          const textNode = doc.createTextNode(newText);
-          range.insertNode(textNode);
-        }
-        
-        range.collapse(false);
-        selection.removeAllRanges();
-        selection.addRange(range);
-      }
-      
-      lastActiveElement.dispatchEvent(new Event('input', { bubbles: true }));
-      lastActiveElement.dispatchEvent(new Event('change', { bubbles: true }));
-      lastActiveElement.focus();
-      
-      console.log('Sostituzione completata in contenteditable/CKEditor');
+
+    const element = state.lastActiveElement;
+    const doc = element.ownerDocument || document;
+
+    if (element.tagName === "TEXTAREA" || element.tagName === "INPUT") {
+      const value = element.value || "";
+      const before = value.substring(0, state.lastSelectionStart);
+      const after = value.substring(state.lastSelectionEnd);
+      element.value = `${before}${newText}${after}`;
+      const caret = state.lastSelectionStart + newText.length;
+      element.setSelectionRange(caret, caret);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.focus();
       return;
     }
-    
-    console.warn('Elemento non gestito:', lastActiveElement.tagName);
-    showError('Errore: tipo di elemento non supportato per la sostituzione.');
-    
-  } catch (error) {
-    console.error('Errore sostituzione testo:', error);
-    showError('Errore durante la sostituzione del testo: ' + error.message);
-  }
-}
 
+    if (element.isContentEditable || element.contentEditable === "true" || element.tagName === "BODY") {
+      const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
+      const range = state.savedRange ? state.savedRange.cloneRange() : doc.createRange();
 
-  // Selezione testo - MODIFICATO per CKEditor
-  document.addEventListener("mouseup", () => {
-    setTimeout(() => {
-      // FIX: Ottieni elemento editabile reale
-      const activeInfo = getActiveEditableElement();
-      const activeElement = activeInfo.element;
-      const doc = activeInfo.iframeDoc;
-
-      const selection = doc.getSelection
-        ? doc.getSelection()
-        : window.getSelection();
-      const selectedText = selection.toString().trim();
-
-      // Se non c'è selezione, prendi tutto il testo dall'elemento attivo
-      if (!selectedText || selectedText.length === 0) {
-        const fullText = getTextFromElement(activeElement);
-
-        if (fullText && fullText.length > 0) {
-          lastSelectedText = fullText;
-          lastActiveElement = activeElement;
-
-          if (
-            activeElement.tagName === "TEXTAREA" ||
-            activeElement.tagName === "INPUT"
-          ) {
-            lastSelectionStart = 0;
-            lastSelectionEnd = fullText.length;
-          } else if (
-            activeElement.isContentEditable ||
-            activeElement.tagName === "BODY"
-          ) {
-            lastSelectionStart = 0;
-            lastSelectionEnd = fullText.length;
-            // Crea range per tutto il contenuto
-            const range = doc.createRange();
-            range.selectNodeContents(activeElement);
-            savedRange = range.cloneRange();
-          }
-
-          console.log(
-            "Nessuna selezione: preso tutto il testo dall'elemento attivo"
-          );
-        }
-        return;
+      if (!state.savedRange) {
+        range.selectNodeContents(element);
       }
 
-      // C'è selezione
-      lastActiveElement = activeElement;
+      selection.removeAllRanges();
+      selection.addRange(range);
+      range.deleteContents();
 
-      console.log("Testo selezionato:", selectedText.substring(0, 30));
-      console.log("Elemento:", activeElement.tagName);
-
-      // Salva posizione selezione
-      if (
-        activeElement.tagName === "TEXTAREA" ||
-        activeElement.tagName === "INPUT"
-      ) {
-        lastSelectionStart = activeElement.selectionStart;
-        lastSelectionEnd = activeElement.selectionEnd;
-        lastSelectedText = selectedText;
-      } else if (
-        activeElement.isContentEditable ||
-        activeElement.tagName === "BODY"
-      ) {
-        if (selection.rangeCount > 0) {
-          savedRange = selection.getRangeAt(0).cloneRange();
-          console.log("Range salvato per contenteditable/CKEditor");
-
-          // FIX: Ottieni HTML pulito dal range salvato subito
-          try {
-            const container = savedRange.cloneContents();
-            const tempDiv = doc.createElement("div");
-            tempDiv.appendChild(container);
-            lastSelectedText = getCleanHTML(tempDiv);
-            console.log(
-              "HTML pulito estratto dal range:",
-              lastSelectedText.substring(0, 100)
-            );
-          } catch (e) {
-            console.error("Errore estrazione HTML:", e);
-            lastSelectedText = selectedText;
-          }
-        } else {
-          lastSelectedText = selectedText;
-        }
-
-        lastSelectionStart = 0;
-        lastSelectionEnd = lastSelectedText.length;
-      }
-
-      // Mostra floating widget solo se:
-      // 1. L'impostazione showFloatingWidget è abilitata
-      // 2. L'elemento attivo è editabile O l'elemento che contiene la selezione è editabile
-      // 3. C'è una selezione valida
-
-      let isInEditableContext = isEditableElement(activeElement);
-
-      // Se activeElement non è editabile, controlla l'elemento della selezione
-      if (!isInEditableContext && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const container = range.commonAncestorContainer;
-        const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
-
-        // Verifica se l'elemento o un suo genitore è editabile
-        let current = element;
-        while (current && current !== doc.body) {
-          if (isEditableElement(current)) {
-            isInEditableContext = true;
-            lastActiveElement = current;
-            break;
-          }
-          current = current.parentElement;
-        }
-      }
-
-      if (showFloatingWidget && isInEditableContext && selection.rangeCount > 0) {
-        const range = selection.getRangeAt(0);
-        const rect = range.getBoundingClientRect();
-
-        // Solo se la selezione ha dimensioni visibili
-        if (rect.width > 0 && rect.height > 0) {
-          if (!floatingSelectionWidget) {
-            floatingSelectionWidget = createFloatingWidget();
-          }
-
-          // Calcola posizione considerando iframe
-          let offsetX = 0;
-          let offsetY = 0;
-
-          if (activeInfo.inIframe && activeInfo.iframe) {
-            const iframeRect = activeInfo.iframe.getBoundingClientRect();
-            offsetX = iframeRect.left;
-            offsetY = iframeRect.top;
-          }
-
-          floatingSelectionWidget.style.left =
-            rect.left + offsetX + rect.width / 2 + window.scrollX - 20 + "px";
-          floatingSelectionWidget.style.top =
-            rect.top + offsetY + window.scrollY - 50 + "px";
-          floatingSelectionWidget.style.display = "block";
-
-          setTimeout(() => {
-            if (floatingSelectionWidget)
-              floatingSelectionWidget.style.display = "none";
-          }, 5000);
-        }
-      }
-    }, 10);
-  });
-
-  // Messaggi da background - MODIFICATO per CKEditor
-  browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    if (message.type === 'OPEN_WIDGET') {
-  // FIX: Ottieni elemento editabile reale
-  const activeInfo = getActiveEditableElement();
-  const activeElement = activeInfo.element;
-  const doc = activeInfo.iframeDoc;
-  
-  const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
-  const selectedText = selection.toString().trim();
-  
-  lastActiveElement = activeElement;
-  
-  console.log('Widget aperto da menu contestuale');
-  console.log('Elemento attivo:', activeElement.tagName);
-  console.log('In iframe:', activeInfo.inIframe);
-  
-  // FIX CRITICO: Salva il range SUBITO se c'è selezione
-  if (selectedText && selectedText.length > 0) {
-    // C'è testo selezionato
-    if (activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'INPUT') {
-      lastSelectionStart = activeElement.selectionStart || 0;
-      lastSelectionEnd = activeElement.selectionEnd || selectedText.length;
-      lastSelectedText = selectedText;
-    } else if (activeElement.isContentEditable || activeElement.tagName === 'BODY') {
-      // SALVA IL RANGE SUBITO
-      if (selection.rangeCount > 0) {
-        savedRange = selection.getRangeAt(0).cloneRange();
-        console.log('Range salvato dal menu contestuale');
-        
-        // Estrai HTML pulito dal range
-        try {
-          const container = savedRange.cloneContents();
-          const tempDiv = doc.createElement('div');
-          tempDiv.appendChild(container);
-          lastSelectedText = getCleanHTML(tempDiv);
-          console.log('HTML pulito estratto:', lastSelectedText.substring(0, 100));
-        } catch (e) {
-          console.error('Errore estrazione HTML:', e);
-          lastSelectedText = selectedText;
-        }
+      if (/<\/?[a-z]/i.test(newText)) {
+        insertHtmlRange(doc, range, newText);
       } else {
-        lastSelectedText = selectedText;
+        insertPlainTextRange(doc, range, newText);
       }
-      
-      lastSelectionStart = 0;
-      lastSelectionEnd = lastSelectedText.length;
+
+      selection.removeAllRanges();
+      selection.addRange(range);
+      state.savedRange = range.cloneRange();
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      element.focus();
+      return;
     }
-  } else {
-    // Nessuna selezione, prendi tutto
-    lastSelectedText = getTextFromElement(activeElement);
-    
-    if (activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'INPUT') {
-      lastSelectionStart = 0;
-      lastSelectionEnd = lastSelectedText.length;
-    } else if (activeElement.isContentEditable || activeElement.tagName === 'BODY') {
-      // Crea range per tutto il contenuto
-      const range = doc.createRange();
-      range.selectNodeContents(activeElement);
-      savedRange = range.cloneRange();
-      console.log('Range creato per tutto il contenuto');
-      lastSelectionStart = 0;
-      lastSelectionEnd = lastSelectedText.length;
+
+    alert(state.strings.widget.unsupportedElement);
+  }
+
+  function insertHtmlRange(doc, range, html) {
+    const tempDiv = doc.createElement("div");
+    tempDiv.innerHTML = html;
+    const nodes = Array.from(tempDiv.childNodes);
+    let lastNode = null;
+
+    nodes.forEach((node, index) => {
+      const cloned = node.cloneNode(true);
+      range.insertNode(cloned);
+      lastNode = cloned;
+      if (index < nodes.length - 1) {
+        range.setStartAfter(cloned);
+        range.collapse(true);
+      }
+    });
+
+    if (lastNode) {
+      range.setStartAfter(lastNode);
+      range.collapse(true);
     }
   }
 
-
-      console.log("Testo catturato:", lastSelectedText.substring(0, 50));
-
-      // FIX: Validazione testo
-      if (!lastSelectedText || lastSelectedText.trim().length === 0) {
-        // Mostra messaggio errore
-        if (!inPageWidget) {
-          inPageWidget = createInPageWidget();
-        }
-        inPageWidget.style.display = "block";
-        showError(
-          "⚠️ Nessun testo rilevato!\n\nSeleziona del testo o posizionati in un campo editabile prima di usare Ollama Assistant."
-        );
-        sendResponse({ status: "error", message: "No text detected" });
+  function insertPlainTextRange(doc, range, text) {
+    const lines = text.split("\n");
+    lines.forEach((line, index) => {
+      const textNode = doc.createTextNode(line);
+      range.insertNode(textNode);
+      if (index < lines.length - 1) {
+        const br = doc.createElement("br");
+        range.setStartAfter(textNode);
+        range.collapse(true);
+        range.insertNode(br);
+        range.setStartAfter(br);
+        range.collapse(true);
+      } else {
+        range.setStartAfter(textNode);
+        range.collapse(true);
+      }
+    });
+  }
+  function handleRuntimeMessage(message, sender, sendResponse) {
+    if (message.type === "OPEN_WIDGET") {
+      captureSelection(false);
+      if (!state.lastSelectedText) {
+        alert(state.strings.widget.selectTextAlert);
+        sendResponse({ status: "error", message: "No text" });
         return true;
       }
-
-
-      openInPageWidget(message.selectedPrompt, message.isCustom);
+      openWidget(message.selectedPrompt, message.isCustom);
       sendResponse({ status: "ok" });
       return true;
     }
 
     if (message.type === "GET_CONTEXT_TEXT") {
-      // FIX: Ottieni elemento editabile reale
-      const activeInfo = getActiveEditableElement();
-      const activeElement = activeInfo.element;
-      const doc = activeInfo.iframeDoc;
-
-      const selection = doc.getSelection
-        ? doc.getSelection()
-        : window.getSelection();
-      let text = selection.toString().trim();
-
-      // Se non c'è selezione, prendi tutto
-      if (!text) {
-        text = getTextFromElement(activeElement);
-      }
-
-      sendResponse({ text, elementType: "text" });
+      captureSelection(false);
+      sendResponse({
+        text: state.lastSelectedText || "",
+        hasText: Boolean(state.lastSelectedText),
+      });
       return true;
     }
-  });
+
+    if (message.type === "REPLACE_TEXT") {
+      replaceTextInElement(message.newText || "");
+      sendResponse({ status: "ok" });
+      return true;
+    }
+
+    if (message.type === "CANCEL") {
+      closeWidget();
+      sendResponse({ status: "ok" });
+      return true;
+    }
+
+    return false;
+  }
 })();

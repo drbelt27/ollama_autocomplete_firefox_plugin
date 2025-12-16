@@ -1,473 +1,510 @@
-let conversationHistory = [];
-let currentTextarea = null;
-let ollamaUrl = '';
-let modelsAvailable = [];
-let defaultPrompts = [];
-let selectedPrompt = '';
-let lastRequestModel = '';
-let defaultTone = 'professionale';
-let selectedTone = 'professionale';
+const DEFAULT_URL = "http://localhost:11434";
+const DEFAULT_MODEL = "llama3";
+const DEFAULT_TONE = "professionale";
+const LANGUAGE_PREF_DEFAULT = "system";
 
-console.log('Popup script inizializzato');
+const state = {
+  ollamaUrl: DEFAULT_URL,
+  defaultModel: DEFAULT_MODEL,
+  defaultTone: DEFAULT_TONE,
+  selectedTone: DEFAULT_TONE,
+  defaultPrompts: [],
+  selectedPrompt: "",
+  languagePreference: LANGUAGE_PREF_DEFAULT,
+  languageCode: "en",
+  languagePack: window.OllamaI18N.get("en"),
+  currentText: "",
+  hasHtmlContext: false,
+  conversationHistory: [],
+  lastResponse: "",
+  activeModel: DEFAULT_MODEL,
+};
 
-document.addEventListener('DOMContentLoaded', async () => {
-  console.log('Popup DOM caricato');
+document.addEventListener("DOMContentLoaded", init);
+
+function formatTemplate(template, values = {}) {
+  if (!template) return "";
+  return template.replace(/\$\{(\w+)\}/g, (_, key) =>
+    typeof values[key] === "undefined" ? "" : String(values[key])
+  );
+}
+
+async function init() {
   await loadSettings();
-  const connectionOk = await checkOllamaConnection();
+  applyPopupTranslations();
+  setupEventListeners();
 
+  const connectionOk = await checkOllamaConnection();
   if (!connectionOk) {
     showConnectionError();
-    setupOpenSettingsButton();
     return;
   }
 
   await loadModelsInWidget();
   await loadTextareaData();
   renderPredefinedPrompts();
-  setupEventListeners();
   updateAskBtnState();
-
   await checkQuickPrompt();
+  hideConnectionError();
+}
 
-  try {
-    browser.runtime.sendMessage({ type: 'CLEAR_BADGE' });
-  } catch (e) {
-    console.log('Badge clearing failed:', e);
+async function loadSettings() {
+  const stored = await browser.storage.local.get([
+    "ollamaUrl",
+    "defaultPrompts",
+    "defaultModel",
+    "defaultTone",
+    "language",
+  ]);
+
+  state.ollamaUrl = stored.ollamaUrl || DEFAULT_URL;
+  state.defaultModel = stored.defaultModel || DEFAULT_MODEL;
+  state.activeModel = state.defaultModel;
+  state.defaultTone = stored.defaultTone || DEFAULT_TONE;
+  state.selectedTone = state.defaultTone;
+  state.languagePreference = stored.language || LANGUAGE_PREF_DEFAULT;
+  state.languageCode = window.OllamaI18N.resolveLanguage(state.languagePreference);
+  state.languagePack = window.OllamaI18N.get(state.languageCode);
+  state.defaultPrompts =
+    stored.defaultPrompts && stored.defaultPrompts.length
+      ? stored.defaultPrompts
+      : [...state.languagePack.prompts];
+  state.conversationHistory = [];
+  state.selectedPrompt = "";
+  state.lastResponse = "";
+
+  document
+    .querySelectorAll(".tone-btn")
+    .forEach((btn) => btn.classList.toggle("selected", btn.dataset.tone === state.selectedTone));
+}
+
+function applyPopupTranslations() {
+  const pack = state.languagePack.popup;
+  document.title = pack.title;
+  const headerTitle = document.querySelector("header h2");
+  if (headerTitle) headerTitle.textContent = pack.title;
+
+  const errorTitle = document.querySelector("#connection-error-section .error-message p");
+  if (errorTitle) errorTitle.textContent = pack.connectionErrorTitle;
+  const errorHelp = document.querySelector("#connection-error-section .error-message .help-text");
+  if (errorHelp) errorHelp.textContent = pack.connectionErrorHelp;
+
+  const retryConnectionBtn = document.getElementById("retry-connection-btn");
+  if (retryConnectionBtn) retryConnectionBtn.textContent = pack.buttons.retry;
+  const openSettingsBtn = document.getElementById("open-settings-btn");
+  if (openSettingsBtn) openSettingsBtn.textContent = pack.buttons.settings;
+
+  const modelLabel = document.querySelector(".model-selector label");
+  if (modelLabel) modelLabel.textContent = `${pack.labels.model}:`;
+  const toneLabel = document.querySelector(".tone-selector label");
+  if (toneLabel) toneLabel.textContent = `${pack.labels.tone}:`;
+  const lengthLabel = document.querySelector(".length-selector label");
+  if (lengthLabel) lengthLabel.textContent = `${pack.labels.length}:`;
+  const promptsLabel = document.querySelector(".prompts-section label");
+  if (promptsLabel) promptsLabel.textContent = `${pack.labels.prompts}:`;
+  const customPromptLabel = document.querySelector(".custom-prompt label");
+  if (customPromptLabel) customPromptLabel.textContent = `${pack.labels.customPrompt}:`;
+
+  const customPromptInput = document.getElementById("custom-prompt-input");
+  if (customPromptInput) customPromptInput.placeholder = pack.placeholders.customPrompt;
+  const modifyLabel = document.querySelector("#modify-section label");
+  if (modifyLabel) modifyLabel.textContent = pack.labels.modify;
+  const modifyInput = document.getElementById("modify-input");
+  if (modifyInput) modifyInput.placeholder = pack.placeholders.modify;
+
+  const lengthSelect = document.getElementById("length");
+  if (lengthSelect) {
+    Array.from(lengthSelect.options).forEach((option) => {
+      if (pack.lengthOptions[option.value]) {
+        option.textContent = pack.lengthOptions[option.value];
+      }
+    });
   }
-});
+
+  const askBtn = document.getElementById("ask-btn");
+  if (askBtn) askBtn.textContent = pack.buttons.ask;
+  const loadingText = document.querySelector("#loading-section p");
+  if (loadingText) loadingText.textContent = pack.loading;
+  const previewTitle = document.querySelector("#preview-section h3");
+  if (previewTitle) previewTitle.textContent = `${pack.previewTitle}:`;
+  const acceptBtn = document.getElementById("accept-btn");
+  if (acceptBtn) acceptBtn.textContent = pack.buttons.accept;
+  const discardBtn = document.getElementById("discard-btn");
+  if (discardBtn) discardBtn.textContent = pack.buttons.discard;
+  const modifyBtn = document.getElementById("modify-btn");
+  if (modifyBtn) modifyBtn.textContent = pack.buttons.modify;
+  const submitModifyBtn = document.getElementById("submit-modify-btn");
+  if (submitModifyBtn) submitModifyBtn.textContent = pack.buttons.submitModify;
+  const retryBtn = document.getElementById("retry-btn");
+  if (retryBtn) retryBtn.textContent = pack.buttons.errorRetry;
+
+  document.querySelectorAll(".tone-btn").forEach((btn) => {
+    const toneValue = btn.dataset.tone;
+    const toneData = state.languagePack.tones.find((tone) => tone.value === toneValue);
+    if (toneData) btn.textContent = toneData.label;
+  });
+}
+
+function setupEventListeners() {
+  const openSettingsBtn = document.getElementById("open-settings-btn");
+  if (openSettingsBtn) {
+    openSettingsBtn.addEventListener("click", () => {
+      browser.runtime.openOptionsPage();
+      window.close();
+    });
+  }
+  const retryConnectionBtn = document.getElementById("retry-connection-btn");
+  if (retryConnectionBtn) {
+    retryConnectionBtn.addEventListener("click", async () => {
+      retryConnectionBtn.disabled = true;
+      await loadSettings();
+      applyPopupTranslations();
+      const ok = await checkOllamaConnection();
+      retryConnectionBtn.disabled = false;
+      if (ok) {
+        hideConnectionError();
+        await loadModelsInWidget();
+        await loadTextareaData();
+        renderPredefinedPrompts();
+        updateAskBtnState();
+      } else {
+        showConnectionError();
+      }
+    });
+  }
+
+  document.querySelectorAll(".tone-btn").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.querySelectorAll(".tone-btn").forEach((b) => b.classList.remove("selected"));
+      btn.classList.add("selected");
+      state.selectedTone = btn.dataset.tone;
+    });
+  });
+
+  const customInput = document.getElementById("custom-prompt-input");
+  if (customInput) {
+    customInput.addEventListener("input", () => {
+      const val = customInput.value.trim();
+      if (val) {
+        state.selectedPrompt = "";
+        document.querySelectorAll(".prompt-btn").forEach((btn) => btn.classList.remove("selected"));
+      }
+      updateAskBtnState();
+    });
+  }
+
+  const modelSelect = document.getElementById("model");
+  if (modelSelect) {
+    modelSelect.addEventListener("change", updateAskBtnState);
+  }
+
+  const askBtn = document.getElementById("ask-btn");
+  if (askBtn) askBtn.addEventListener("click", handleAskClick);
+  const acceptBtn = document.getElementById("accept-btn");
+  if (acceptBtn) acceptBtn.addEventListener("click", handleAccept);
+  const discardBtn = document.getElementById("discard-btn");
+  if (discardBtn) discardBtn.addEventListener("click", handleDiscard);
+  const modifyBtn = document.getElementById("modify-btn");
+  if (modifyBtn) modifyBtn.addEventListener("click", handleModifyRequest);
+  const submitModifyBtn = document.getElementById("submit-modify-btn");
+  if (submitModifyBtn) submitModifyBtn.addEventListener("click", handleSubmitModify);
+  const retryBtn = document.getElementById("retry-btn");
+  if (retryBtn) retryBtn.addEventListener("click", resetToControls);
+}
 
 async function checkOllamaConnection() {
   try {
-    // Carica debugMode se disponibile
-    const debugResult = await browser.storage.local.get(['debugMode']);
-    const debugMode = debugResult.debugMode === true;
-
-    if (debugMode) {
-      console.log('[DEBUG POPUP] Testing Ollama connection...');
-      console.log('[DEBUG POPUP] URL:', ollamaUrl + '/api/tags');
-    }
-
     const response = await browser.runtime.sendMessage({
-      type: 'OLLAMA_REQUEST',
-      url: `${ollamaUrl}/api/tags`,
-      body: {}
+      type: "OLLAMA_REQUEST",
+      url: `${state.ollamaUrl}/api/tags`,
+      body: {},
     });
-
-    if (debugMode) {
-      console.log('[DEBUG POPUP] Response:', response);
-      console.log('[DEBUG POPUP] Success:', response.success);
-      if (response.data) {
-        console.log('[DEBUG POPUP] Data:', response.data);
-      }
-      if (response.error) {
-        console.error('[DEBUG POPUP] Error:', response.error);
-      }
-    }
-
     return response.success;
   } catch (error) {
-    const debugResult = await browser.storage.local.get(['debugMode']);
-    const debugMode = debugResult.debugMode === true;
-
-    if (debugMode) {
-      console.error('[DEBUG POPUP] Connection failed!');
-      console.error('[DEBUG POPUP] Error:', error);
-      console.error('[DEBUG POPUP] Error message:', error.message);
-    } else {
-      console.error('Errore connessione Ollama:', error);
-    }
+    console.error("Connection check failed", error);
     return false;
   }
 }
 
 function showConnectionError() {
-  document.getElementById('connection-error-section').classList.remove('hidden');
-  document.getElementById('controls-section').classList.add('hidden');
+  document.getElementById("connection-error-section").classList.remove("hidden");
+  document.getElementById("controls-section").classList.add("hidden");
 }
 
-async function loadSettings() {
-  console.log('Caricamento impostazioni...');
-  const result = await browser.storage.local.get(['ollamaUrl', 'defaultModel', 'defaultPrompts', 'defaultTone']);
-  ollamaUrl = result.ollamaUrl || 'http://localhost:11434';
-  defaultPrompts = result.defaultPrompts || [
-    'Correggi gli errori grammaticali',
-    'Rendi il testo più chiaro',
-    'Abbrevia il testo mantenendo i concetti chiave',
-    'Espandi testo con maggiori dettagli',
-    'Traduci in inglese'
-  ];
-  lastRequestModel = result.defaultModel || 'llama3';
-  defaultTone = result.defaultTone || 'professionale';
-  selectedTone = defaultTone;
-
-  // Imposta il tono selezionato sui bottoni
-  const toneButtons = document.querySelectorAll('.tone-btn');
-  toneButtons.forEach(btn => {
-    if (btn.dataset.tone === defaultTone) {
-      btn.classList.add('selected');
-    }
-  });
-
-  console.log('Impostazioni caricate:', { ollamaUrl, defaultModel: lastRequestModel, defaultTone });
+function hideConnectionError() {
+  document.getElementById("connection-error-section").classList.add("hidden");
+  document.getElementById("controls-section").classList.remove("hidden");
 }
 
 async function loadModelsInWidget() {
-  console.log('Caricamento modelli...');
-  const select = document.getElementById('model');
-  select.innerHTML = '<option value="">Caricamento...</option>';
+  const select = document.getElementById("model");
+  if (!select) return;
+  select.innerHTML = `<option value="">${state.languagePack.popup.loading || "..."}</option>`;
   select.disabled = true;
 
   try {
     const response = await browser.runtime.sendMessage({
-      type: 'OLLAMA_REQUEST',
-      url: `${ollamaUrl}/api/tags`,
-      body: {}
+      type: "OLLAMA_REQUEST",
+      url: `${state.ollamaUrl}/api/tags`,
+      body: {},
     });
-
-    if (!response.success) {
-      throw new Error(response.error);
-    }
-
-    const data = response.data;
-    modelsAvailable = (data.models || []).map(m => m.name);
-    console.log('Modelli disponibili:', modelsAvailable);
-
-    select.innerHTML = '';
-    modelsAvailable.forEach(m => {
-      const opt = document.createElement('option');
-      opt.value = m;
-      opt.textContent = m;
+    if (!response.success) throw new Error(response.error || "Failed to load models");
+    const models = (response.data.models || []).map((model) => model.name);
+    select.innerHTML = "";
+    models.forEach((model) => {
+      const opt = document.createElement("option");
+      opt.value = model;
+      opt.textContent = model;
       select.appendChild(opt);
     });
-
-    select.value = lastRequestModel;
+    if (!models.includes(state.defaultModel)) {
+      state.defaultModel = models[0] || DEFAULT_MODEL;
+    }
+    select.value = state.defaultModel;
     select.disabled = false;
   } catch (error) {
-    console.error('Errore caricamento modelli:', error);
-    modelsAvailable = [lastRequestModel];
-    select.innerHTML = `<option value="${lastRequestModel}">${lastRequestModel}</option>`;
+    console.error("Model loading failed", error);
+    select.innerHTML = "";
+    const fallback = document.createElement("option");
+    fallback.value = state.defaultModel;
+    fallback.textContent = state.defaultModel;
+    select.appendChild(fallback);
     select.disabled = false;
   }
 }
 
 async function loadTextareaData() {
-  console.log('Richiesta dati textarea al background...');
   try {
-    const response = await browser.runtime.sendMessage({ type: 'GET_CURRENT_TEXTAREA' });
-    console.log('Risposta background:', response);
-    currentTextarea = response;
-
-    if (!currentTextarea || !currentTextarea.text) {
-      console.warn('Nessun testo disponibile');
-      showError('Nessun testo da elaborare.\n\nSeleziona del testo e usa il widget floating o il menu contestuale (tasto destro).');
-    } else {
-      console.log('Testo caricato:', currentTextarea.text.substring(0, 100) + '...');
+    const response = await sendMessageToActiveTab({ type: "GET_CONTEXT_TEXT" });
+    state.currentText = response?.text || "";
+    state.hasHtmlContext = /<\/?[a-z][\s\S]*>/i.test(state.currentText);
+    if (!state.currentText) {
+      showError(state.languagePack.popup.errors.missingText);
     }
   } catch (error) {
-    console.error('Errore recupero textarea:', error);
-    showError('Errore nel recupero del testo: ' + error.message);
+    console.error("Failed to read active tab", error);
+    showError(state.languagePack.popup.errors.missingText);
   }
 }
 
-async function checkQuickPrompt() {
-  const result = await browser.storage.local.get(['quickPrompt', 'quickPromptActive']);
-
-  if (result.quickPromptActive && result.quickPrompt) {
-    console.log('Quick prompt attivo:', result.quickPrompt);
-
-    const promptBtns = document.querySelectorAll('.prompt-btn');
-    promptBtns.forEach(btn => {
-      if (btn.textContent === result.quickPrompt) {
-        btn.classList.add('selected');
-        selectedPrompt = result.quickPrompt;
-      }
-    });
-
-    await browser.storage.local.set({
-      quickPrompt: null,
-      quickPromptActive: false
-    });
-
-    updateAskBtnState();
-
-    setTimeout(() => {
-      if (document.getElementById('ask-btn').disabled === false) {
-        document.getElementById('ask-btn').click();
-      }
-    }, 500);
+async function sendMessageToActiveTab(payload) {
+  const tabs = await browser.tabs.query({ active: true, currentWindow: true });
+  const tab = tabs[0];
+  if (!tab || tab.id == null) {
+    throw new Error("No active tab");
   }
+  return browser.tabs.sendMessage(tab.id, payload);
 }
 
 function renderPredefinedPrompts() {
-  const container = document.getElementById('predefined-prompts');
-  container.innerHTML = '';
+  const container = document.getElementById("predefined-prompts");
+  if (!container) return;
+  container.innerHTML = "";
 
-  defaultPrompts.forEach(prompt => {
-    const btn = document.createElement('button');
-    btn.className = 'prompt-btn';
+  state.defaultPrompts.forEach((prompt) => {
+    const btn = document.createElement("button");
+    btn.className = "prompt-btn";
     btn.textContent = prompt;
-    btn.onclick = () => handlePromptClick(btn, prompt);
+    btn.addEventListener("click", () => handlePromptClick(btn, prompt));
     container.appendChild(btn);
   });
 }
 
-function handlePromptClick(btnElement, prompt) {
-  const allBtns = document.querySelectorAll('.prompt-btn');
-
-  if (selectedPrompt === prompt) {
-    btnElement.classList.remove('selected');
-    selectedPrompt = '';
+function handlePromptClick(btn, prompt) {
+  const alreadySelected = state.selectedPrompt === prompt;
+  document.querySelectorAll(".prompt-btn").forEach((button) => button.classList.remove("selected"));
+  if (alreadySelected) {
+    state.selectedPrompt = "";
+    btn.classList.remove("selected");
   } else {
-    allBtns.forEach(btn => btn.classList.remove('selected'));
-    btnElement.classList.add('selected');
-    selectedPrompt = prompt;
-    document.getElementById('custom-prompt-input').value = '';
+    state.selectedPrompt = prompt;
+    btn.classList.add("selected");
+    const customInput = document.getElementById("custom-prompt-input");
+    if (customInput) customInput.value = "";
   }
-
   updateAskBtnState();
 }
 
-function setupOpenSettingsButton() {
-  const openSettingsBtn = document.getElementById('open-settings-btn');
-  if (openSettingsBtn) {
-    openSettingsBtn.addEventListener('click', () => {
-      browser.runtime.openOptionsPage();
-      window.close();
-    });
-  }
-
-  const retryBtn = document.getElementById('retry-connection-btn');
-  if (retryBtn) {
-    retryBtn.addEventListener('click', async () => {
-      retryBtn.disabled = true;
-      retryBtn.textContent = 'Connessione...';
-
-      await loadSettings();
-      const connectionOk = await checkOllamaConnection();
-
-      if (connectionOk) {
-        // Nascondi errore, mostra controlli
-        document.getElementById('connection-error-section').classList.add('hidden');
-        document.getElementById('controls-section').classList.remove('hidden');
-
-        // Inizializza il popup
-        await loadModelsInWidget();
-        await loadTextareaData();
-        renderPredefinedPrompts();
-        setupEventListeners();
-        updateAskBtnState();
-        await checkQuickPrompt();
-      } else {
-        retryBtn.disabled = false;
-        retryBtn.textContent = 'Riprova';
-        alert('Connessione fallita. Verifica che Ollama sia in esecuzione.');
-      }
-    });
-  }
-}
-
-function setupEventListeners() {
-  setupOpenSettingsButton();
-
-  // Listener per bottoni tono
-  const toneButtons = document.querySelectorAll('.tone-btn');
-  toneButtons.forEach(btn => {
-    btn.addEventListener('click', () => {
-      toneButtons.forEach(b => b.classList.remove('selected'));
-      btn.classList.add('selected');
-      selectedTone = btn.dataset.tone;
-    });
-  });
-
-  const customInput = document.getElementById('custom-prompt-input');
-  customInput.addEventListener('input', () => {
-    const val = customInput.value.trim();
-    if (val) {
-      selectedPrompt = '';
-      document.querySelectorAll('.prompt-btn').forEach(btn => btn.classList.remove('selected'));
-    }
-    updateAskBtnState();
-  });
-
-  document.getElementById('model').addEventListener('change', updateAskBtnState);
-  document.getElementById('ask-btn').addEventListener('click', handleAskClick);
-  document.getElementById('accept-btn').addEventListener('click', handleAccept);
-  document.getElementById('discard-btn').addEventListener('click', handleDiscard);
-  document.getElementById('modify-btn').addEventListener('click', handleModifyRequest);
-  document.getElementById('submit-modify-btn').addEventListener('click', handleSubmitModify);
-  document.getElementById('retry-btn').addEventListener('click', resetToControls);
-}
-
 function updateAskBtnState() {
-  const modelSelected = document.getElementById('model').value;
-  const customPrompt = document.getElementById('custom-prompt-input').value.trim();
-
-  const hasPrompt = selectedPrompt || customPrompt;
-  const enable = modelSelected && hasPrompt && !(selectedPrompt && customPrompt);
-
-  document.getElementById('ask-btn').disabled = !enable;
+  const modelSelected = document.getElementById("model")?.value;
+  const customPrompt = document.getElementById("custom-prompt-input")?.value.trim();
+  const hasPrompt = state.selectedPrompt || customPrompt;
+  const enable = Boolean(modelSelected && hasPrompt && !(state.selectedPrompt && customPrompt));
+  const askBtn = document.getElementById("ask-btn");
+  if (askBtn) askBtn.disabled = !enable;
 }
 
 async function handleAskClick() {
-  const model = document.getElementById('model').value;
-  const customPrompt = document.getElementById('custom-prompt-input').value.trim();
-  const prompt = customPrompt || selectedPrompt;
-
-  console.log('Richiesta con modello:', model, 'e prompt:', prompt);
+  const model = document.getElementById("model")?.value;
+  const customPrompt = document.getElementById("custom-prompt-input")?.value.trim();
+  const prompt = customPrompt || state.selectedPrompt;
 
   if (!model || !prompt) {
-    showError('Seleziona un modello e un prompt!');
+    showError(state.languagePack.popup.errors.missingPrompt);
+    return;
+  }
+  if (!state.currentText) {
+    showError(state.languagePack.popup.errors.missingText);
     return;
   }
 
-  if (!currentTextarea || !currentTextarea.text) {
-    showError('Nessun testo da elaborare.\n\nSeleziona del testo nella pagina.');
-    return;
-  }
-
-  lastRequestModel = model;
+  state.activeModel = model;
   await makeOllamaRequest(model, prompt);
 }
 
 async function makeOllamaRequest(model, prompt) {
   showLoading();
-
-  const tone = selectedTone;
-  const length = document.getElementById('length').value;
-  const text = currentTextarea.text;
-
-  let lengthInstruction = '';
-  switch (length) {
-    case 'breve':
-      lengthInstruction = 'Rispondi in modo conciso e breve.';
-      break;
-    case 'media':
-      lengthInstruction = 'Rispondi in modo equilibrato.';
-      break;
-    case 'lunga':
-      lengthInstruction = 'Rispondi in modo dettagliato.';
-      break;
-    case 'dettagliata':
-      lengthInstruction = 'Rispondi in modo molto dettagliato e completo.';
-      break;
-  }
-
-  const userMessage = `Sto scrivendo questo testo: "${text}". ${prompt}. Usa un tono ${tone}. ${lengthInstruction} Rispondi solo con il testo migliorato, senza emoji o caratteri strani.`;
+  const toneMention =
+    state.languagePack.toneMentions?.[state.selectedTone] || state.selectedTone;
+  const lengthValue = document.getElementById("length")?.value || "media";
+  const lengthInstruction =
+    state.languagePack.popup.lengthInstructions[lengthValue] || "";
+  const expectsHtml = state.hasHtmlContext;
+  const aiPack = state.languagePack.ai || {};
+  const systemPrompt = expectsHtml
+    ? aiPack.htmlSystem
+    : state.languagePack.popup.systemPrompt;
+  const template = expectsHtml
+    ? aiPack.htmlUserTemplate
+    : state.languagePack.popup.requestTemplate;
+  const userMessage = formatTemplate(template, {
+    text: state.currentText,
+    prompt,
+    tone: toneMention,
+    lengthInstruction,
+  });
 
   const messages = [
-    { role: 'system', content: 'Rispondi solo con il testo richiesto senza emoji o caratteri strani.' },
-    ...conversationHistory,
-    { role: 'user', content: userMessage }
+    { role: "system", content: systemPrompt },
+    ...state.conversationHistory,
+    { role: "user", content: userMessage },
   ];
-
-  console.log('Invio richiesta a Ollama via background script (bypass CORS)');
 
   try {
     const response = await browser.runtime.sendMessage({
-      type: 'OLLAMA_REQUEST',
-      url: `${ollamaUrl}/api/chat`,
-      body: {
-        model: model,
-        stream: false,
-        messages: messages
-      }
+      type: "OLLAMA_REQUEST",
+      url: `${state.ollamaUrl}/api/chat`,
+      body: { model, stream: false, messages },
     });
+    if (!response.success) throw new Error(response.error || "Request failed");
 
-    console.log('Risposta background:', response);
+    let message = response.data?.message?.content || "";
+    if (!message) throw new Error("Empty response from Ollama");
+    message = message.replace(/^```[a-zA-Z0-9]*\n?/g, "").replace(/```$/g, "").trim();
+    message = message.replace(/^['"]|['"]$/g, "").trim();
 
-    if (!response.success) {
-      throw new Error(response.error);
+    if (expectsHtml && !/<\/?[a-z]/i.test(message)) {
+      showError(state.languagePack.popup.errors.htmlMissing);
+      return;
     }
 
-    const data = response.data;
-    console.log('Risposta Ollama:', data);
-
-    if (!data.message || !data.message.content) {
-      throw new Error('Risposta vuota dal modello');
-    }
-
-    const aiResponse = data.message.content;
-
-    conversationHistory.push({ role: 'user', content: userMessage });
-    conversationHistory.push({ role: 'assistant', content: aiResponse });
-
-    showPreview(aiResponse);
+    state.conversationHistory.push({ role: "user", content: userMessage });
+    state.conversationHistory.push({ role: "assistant", content: message });
+    state.lastResponse = message;
+    showPreview(message, expectsHtml);
   } catch (error) {
-    console.error('Errore chiamata Ollama:', error);
-    showError(`Errore comunicazione con Ollama:\n${error.message}\n\nVerifica:\n• Server attivo su ${ollamaUrl}\n• Modello "${model}" disponibile\n\nSe l'errore persiste, configura CORS:\nOLLAMA_ORIGINS="*" ollama serve`);
+    const packErrors = state.languagePack.popup.errors;
+    const message =
+      packErrors?.ollama && error?.message
+        ? packErrors.ollama(state.ollamaUrl, model, error.message)
+        : error?.message || packErrors?.connectionFailed || "Ollama request failed.";
+    showError(message);
   }
 }
 
 function showLoading() {
-  hideAllSections();
-  document.getElementById('loading-section').classList.remove('hidden');
+  ["controls-section", "preview-section", "modify-section", "error-section"].forEach((id) =>
+    document.getElementById(id)?.classList.add("hidden")
+  );
+  document.getElementById("loading-section")?.classList.remove("hidden");
 }
 
-function showPreview(text) {
-  hideAllSections();
-  document.getElementById('preview-text').textContent = text;
-  document.getElementById('preview-section').classList.remove('hidden');
+function showPreview(text, isHtml) {
+  ["controls-section", "loading-section", "modify-section", "error-section"].forEach((id) =>
+    document.getElementById(id)?.classList.add("hidden")
+  );
+  const previewBox = document.getElementById("preview-text");
+  if (previewBox) {
+    if (isHtml || /<\/?[a-z]/i.test(text)) {
+      previewBox.innerHTML = text;
+    } else {
+      previewBox.textContent = text;
+    }
+  }
+  document.getElementById("preview-section")?.classList.remove("hidden");
 }
 
 function showError(message) {
-  hideAllSections();
-  document.getElementById('error-text').textContent = message;
-  document.getElementById('error-section').classList.remove('hidden');
-}
-
-function hideAllSections() {
-  ['controls-section', 'loading-section', 'preview-section', 'modify-section', 'error-section']
-    .forEach(id => document.getElementById(id).classList.add('hidden'));
+  ["controls-section", "loading-section", "preview-section", "modify-section"].forEach((id) =>
+    document.getElementById(id)?.classList.add("hidden")
+  );
+  const errorText = document.getElementById("error-text");
+  if (errorText) errorText.textContent = message;
+  document.getElementById("error-section")?.classList.remove("hidden");
 }
 
 function resetToControls() {
-  hideAllSections();
-  document.getElementById('controls-section').classList.remove('hidden');
+  ["loading-section", "preview-section", "modify-section", "error-section"].forEach((id) =>
+    document.getElementById(id)?.classList.add("hidden")
+  );
+  document.getElementById("controls-section")?.classList.remove("hidden");
 }
 
 async function handleAccept() {
-  const previewText = document.getElementById('preview-text').textContent;
-  console.log('Accettazione testo...');
-
+  if (!state.lastResponse) return;
   try {
-    await browser.runtime.sendMessage({
-      type: 'REPLACE_TEXT',
-      newText: previewText
-    });
-    conversationHistory = [];
+    await sendMessageToActiveTab({ type: "REPLACE_TEXT", newText: state.lastResponse });
+    state.conversationHistory = [];
     window.close();
   } catch (error) {
-    console.error('Errore sostituzione:', error);
-    showError('Errore nella sostituzione del testo: ' + error.message);
+    console.error("Failed to insert text", error);
+    showError("Unable to insert the generated text.");
   }
 }
 
 async function handleDiscard() {
-  console.log('Scarto modifiche...');
   try {
-    await browser.runtime.sendMessage({ type: 'CANCEL' });
-    conversationHistory = [];
-    window.close();
+    await sendMessageToActiveTab({ type: "CANCEL" });
   } catch (error) {
-    console.error('Errore:', error);
-    window.close();
+    console.warn("Discard message failed", error);
   }
+  state.conversationHistory = [];
+  window.close();
 }
 
 function handleModifyRequest() {
-  document.getElementById('preview-section').classList.add('hidden');
-  document.getElementById('modify-section').classList.remove('hidden');
+  document.getElementById("preview-section")?.classList.add("hidden");
+  document.getElementById("modify-section")?.classList.remove("hidden");
 }
 
 async function handleSubmitModify() {
-  const modifyText = document.getElementById('modify-input').value.trim();
-
+  const modifyInput = document.getElementById("modify-input");
+  if (!modifyInput) return;
+  const modifyText = modifyInput.value.trim();
   if (!modifyText) {
-    alert('Descrivi la modifica desiderata.');
+    alert(state.languagePack.popup.errors.modifyEmpty);
     return;
   }
+  await makeOllamaRequest(state.activeModel || state.defaultModel, modifyText);
+  modifyInput.value = "";
+}
 
-  console.log('Richiesta modifica:', modifyText);
-  await makeOllamaRequest(lastRequestModel, modifyText);
-  document.getElementById('modify-input').value = '';
+async function checkQuickPrompt() {
+  const stored = await browser.storage.local.get(["quickPrompt", "quickPromptActive"]);
+  if (stored.quickPromptActive && stored.quickPrompt) {
+    document.querySelectorAll(".prompt-btn").forEach((btn) => {
+      if (btn.textContent === stored.quickPrompt) {
+        btn.classList.add("selected");
+        state.selectedPrompt = stored.quickPrompt;
+      }
+    });
+    await browser.storage.local.set({ quickPrompt: null, quickPromptActive: false });
+    updateAskBtnState();
+    setTimeout(() => {
+      const askBtn = document.getElementById("ask-btn");
+      if (askBtn && !askBtn.disabled) {
+        askBtn.click();
+      }
+    }, 400);
+  }
 }

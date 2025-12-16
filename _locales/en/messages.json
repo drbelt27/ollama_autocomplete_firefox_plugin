@@ -1,0 +1,102 @@
+{
+  "extensionName": {
+    "message": "Ollama Textarea Assistant",
+    "description": "Name of the extension"
+  },
+  "extensionDescription": {
+    "message": "AI Assistant with Ollama",
+    "description": "Description of the extension"
+  },
+  "contextMenuTitle": {
+    "message": "Ollama Assistant",
+    "description": "Title of the context menu"
+  },
+  "contextMenuCustomPrompt": {
+    "message": "Custom prompt...",
+    "description": "Custom prompt menu item"
+  },
+  "contextMenuNotification": {
+    "message": "Reload this page (F5) to enable the assistant on this tab.",
+    "description": "Notification when content script is not loaded"
+  },
+  "prompt1": {
+    "message": "Fix grammar mistakes",
+    "description": "First default prompt"
+  },
+  "prompt2": {
+    "message": "Make the text clearer",
+    "description": "Second default prompt"
+  },
+  "prompt3": {
+    "message": "Summarize the main ideas",
+    "description": "Third default prompt"
+  },
+  "prompt4": {
+    "message": "Expand the text with more details",
+    "description": "Fourth default prompt"
+  },
+  "prompt5": {
+    "message": "Translate to English",
+    "description": "Fifth default prompt"
+  },
+  "toneFormal": {
+    "message": "Formal",
+    "description": "Formal tone"
+  },
+  "toneProfessional": {
+    "message": "Professional",
+    "description": "Professional tone"
+  },
+  "toneFriendly": {
+    "message": "Friendly",
+    "description": "Friendly tone"
+  },
+  "toneCasual": {
+    "message": "Casual",
+    "description": "Casual tone"
+  },
+  "widgetTitle": {
+    "message": "Ollama Assistant",
+    "description": "Widget title"
+  },
+  "widgetClose": {
+    "message": "Close",
+    "description": "Close button"
+  },
+  "widgetToneLabel": {
+    "message": "Tone",
+    "description": "Tone label"
+  },
+  "widgetPromptLabel": {
+    "message": "Prompt",
+    "description": "Prompt label"
+  },
+  "widgetAskButton": {
+    "message": "Process",
+    "description": "Process button"
+  },
+  "widgetAcceptButton": {
+    "message": "Accept",
+    "description": "Accept button"
+  },
+  "widgetDiscardButton": {
+    "message": "Discard",
+    "description": "Discard button"
+  },
+  "widgetModifyButton": {
+    "message": "Modify",
+    "description": "Modify button"
+  },
+  "widgetRetryButton": {
+    "message": "Retry",
+    "description": "Retry button"
+  },
+  "widgetPromptPlaceholder": {
+    "message": "Write your instruction...",
+    "description": "Prompt field placeholder"
+  },
+  "widgetLoading": {
+    "message": "Processing...",
+    "description": "Loading message"
+  }
+}

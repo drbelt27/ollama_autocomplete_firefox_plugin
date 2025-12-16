@@ -1,156 +1,166 @@
-let currentTextarea = null;
-let defaultPrompts = [];
+const DEFAULT_OLLAMA_URL = "http://localhost:11434";
+const DEFAULT_MODEL = "llama3";
+const MENU_ICON_SIZES = {
+  16: "icons/icon-16.png",
+  32: "icons/icon-32.png",
+};
 
-async function initializeExtension() {
-  const result = await browser.storage.local.get(['ollamaUrl', 'defaultPrompts', 'defaultModel']);
-  
-  if (!result.ollamaUrl) {
-    await browser.storage.local.set({ ollamaUrl: 'http://localhost:11434' });
-  }
-  
-  if (!result.defaultPrompts) {
-    defaultPrompts = [
-      'Correggi gli errori grammaticali',
-      'Rendi il testo più chiaro',
-      'Abbrevia il testo mantenendo i concetti chiave',
-      'Espandi testo con maggiori dettagli',
-      'Traduci in inglese'
-    ];
-    await browser.storage.local.set({ defaultPrompts: defaultPrompts });
-  } else {
-    defaultPrompts = result.defaultPrompts;
-  }
-  
-  if (!result.defaultModel) {
-    await browser.storage.local.set({ defaultModel: 'llama3' });
-  }
-  
-  console.log('Estensione inizializzata, prompt:', defaultPrompts);
-  createContextMenu();
+let cachedPrompts = [];
+
+// Ottieni i prompt predefiniti tradotti
+function getDefaultPrompts() {
+  return [
+    browser.i18n.getMessage("prompt1"),
+    browser.i18n.getMessage("prompt2"),
+    browser.i18n.getMessage("prompt3"),
+    browser.i18n.getMessage("prompt4"),
+    browser.i18n.getMessage("prompt5"),
+  ].filter(p => p); // Filtra eventuali stringhe vuote
 }
 
-function createContextMenu() {
+async function initializeExtension() {
+  const stored = await browser.storage.local.get([
+    "ollamaUrl",
+    "defaultPrompts",
+    "defaultModel",
+  ]);
+
+  const updates = {};
+
+  if (!stored.ollamaUrl) {
+    updates.ollamaUrl = DEFAULT_OLLAMA_URL;
+  }
+
+  if (!stored.defaultModel) {
+    updates.defaultModel = DEFAULT_MODEL;
+  }
+
+  // Usa i prompt salvati o quelli predefiniti tradotti
+  if (!stored.defaultPrompts || !stored.defaultPrompts.length) {
+    cachedPrompts = getDefaultPrompts();
+    updates.defaultPrompts = [...cachedPrompts];
+  } else {
+    cachedPrompts = stored.defaultPrompts;
+  }
+
+  if (Object.keys(updates).length) {
+    await browser.storage.local.set(updates);
+  }
+
+  buildContextMenu();
+  console.log('Menu contestuale inizializzato con', cachedPrompts.length, 'prompts');
+}
+
+function buildContextMenu() {
   console.log('Creazione menu contestuale');
-  
+
   browser.contextMenus.removeAll().then(() => {
+    // Menu principale
     browser.contextMenus.create({
       id: "ollama-assistant",
-      title: "Ollama Assistant",
-      contexts: ["selection", "editable"]
+      title: browser.i18n.getMessage("contextMenuTitle"),
+      contexts: ["selection", "editable"],
+      icons: MENU_ICON_SIZES,
     });
-    
-    defaultPrompts.forEach((prompt, index) => {
+
+    // Aggiungi i prompt predefiniti
+    cachedPrompts.forEach((prompt, index) => {
       browser.contextMenus.create({
         id: `ollama-prompt-${index}`,
         parentId: "ollama-assistant",
         title: prompt,
-        contexts: ["selection", "editable"]
+        contexts: ["selection", "editable"],
       });
     });
-    
-    browser.contextMenus.create({
-      id: "ollama-separator",
-      parentId: "ollama-assistant",
-      type: "separator",
-      contexts: ["selection", "editable"]
-    });
-    
+
+    // Separatore se ci sono prompt
+    if (cachedPrompts.length) {
+      browser.contextMenus.create({
+        id: "ollama-separator",
+        parentId: "ollama-assistant",
+        type: "separator",
+        contexts: ["selection", "editable"],
+      });
+    }
+
+    // Prompt personalizzato
     browser.contextMenus.create({
       id: "ollama-custom",
       parentId: "ollama-assistant",
-      title: "✏️ Prompt personalizzato...",
-      contexts: ["selection", "editable"]
+      title: browser.i18n.getMessage("contextMenuCustomPrompt"),
+      contexts: ["selection", "editable"],
     });
-    
-    console.log('Menu contestuale creato');
+
+    console.log('Menu contestuale creato con successo con', cachedPrompts.length, 'prompts');
+  }).catch(error => {
+    console.error('Errore creazione menu contestuale:', error);
   });
 }
 
 browser.storage.onChanged.addListener((changes, area) => {
-  if (area === 'local' && changes.defaultPrompts) {
-    defaultPrompts = changes.defaultPrompts.newValue;
-    createContextMenu();
+  if (area !== "local") return;
+
+  if (changes.defaultPrompts) {
+    cachedPrompts = changes.defaultPrompts.newValue || [];
+    buildContextMenu();
   }
 });
 
 browser.contextMenus.onClicked.addListener(async (info, tab) => {
-  console.log('Menu cliccato:', info.menuItemId);
-  
   let selectedPrompt = null;
   let isCustom = false;
-  
-  if (info.menuItemId.startsWith('ollama-prompt-')) {
-    const promptIndex = parseInt(info.menuItemId.replace('ollama-prompt-', ''));
-    selectedPrompt = defaultPrompts[promptIndex];
-  } else if (info.menuItemId === 'ollama-custom') {
-    isCustom = true;
-  } else if (info.menuItemId === 'ollama-assistant') {
+
+  if (info.menuItemId.startsWith("ollama-prompt-")) {
+    const index = parseInt(info.menuItemId.replace("ollama-prompt-", ""), 10);
+    selectedPrompt = cachedPrompts[index] || null;
+  } else if (
+    info.menuItemId === "ollama-custom" ||
+    info.menuItemId === "ollama-assistant"
+  ) {
     isCustom = true;
   }
-  
+
   try {
     await browser.tabs.sendMessage(tab.id, {
-      type: 'OPEN_WIDGET',
+      type: "OPEN_WIDGET",
       selectionText: info.selectionText,
-      selectedPrompt: selectedPrompt,
-      isCustom: isCustom
+      selectedPrompt,
+      isCustom,
     });
-    console.log('Messaggio inviato con successo');
-  } catch (err) {
-    console.error('Errore apertura widget:', err);
-    
-    // Mostra notifica all'utente
-    browser.notifications.create({
-      type: "basic",
-      title: "Ollama Assistant",
-      message: "Ricarica la pagina (F5) per usare l'estensione su questa scheda."
-    }).catch(() => {
-      console.log('Impossibile mostrare notifica');
-    });
+  } catch (error) {
+    browser.notifications
+      .create({
+        type: "basic",
+        title: browser.i18n.getMessage("contextMenuTitle"),
+        message: browser.i18n.getMessage("contextMenuNotification"),
+      })
+      .catch(() => {});
   }
 });
 
-browser.runtime.onMessage.addListener((message, sender, sendResponse) => {
-  console.log('Background ricevuto:', message.type);
-  
-  if (message.type === 'OLLAMA_REQUEST') {
-    fetch(message.url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(message.body)
-    })
-    .then(response => {
+browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+  if (message.type !== "OLLAMA_REQUEST") return false;
+
+  fetch(message.url, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(message.body),
+  })
+    .then((response) => {
       if (!response.ok) {
-        return response.text().then(text => {
-          throw new Error(`HTTP ${response.status}: ${text || 'Errore sconosciuto'}`);
+        return response.text().then((text) => {
+          throw new Error(`HTTP ${response.status}: ${text || "Unknown error"}`);
         });
       }
       return response.json();
     })
-    .then(data => {
-      sendResponse({ success: true, data: data });
-    })
-    .catch(error => {
-      sendResponse({ success: false, error: error.message });
-    });
-    
-    return true;
-  }
-  
-  if (message.type === 'GET_CURRENT_TEXTAREA') {
-    sendResponse(currentTextarea);
-    return true;
-  }
-  
-  return false;
+    .then((data) => sendResponse({ success: true, data }))
+    .catch((error) => sendResponse({ success: false, error: error.message }));
+
+  return true;
 });
 
-browser.runtime.onInstalled.addListener(() => {
-  initializeExtension();
-});
-
-browser.runtime.onStartup.addListener(() => {
-  initializeExtension();
-});
+browser.runtime.onInstalled.addListener(initializeExtension);
+browser.runtime.onStartup.addListener(initializeExtension);
 
 initializeExtension();
