@@ -1,6 +1,18 @@
 # Ollama Textarea Assistant
 
-Firefox extension that brings your local Ollama models into any text box on the web. Select text or place the caret inside a textarea, rich text editor, or CKEditor instance and the assistant will open an in-page workspace where you can rewrite, translate, summarize, or expand the content with one click.
+**Version 2.2.0** - Firefox extension that brings your local Ollama models into any text box on the web. Select text or place the caret inside a textarea, rich text editor, or CKEditor instance and the assistant will open an in-page workspace where you can rewrite, translate, summarize, or expand the content with one click.
+
+## ✨ What's New in v2.2.0
+
+- **🎨 Custom Branding**: Plugin icons and logos throughout the interface (toolbar, popup, settings)
+- **🔌 Connection Validation**: Automatic Ollama connection check with guided setup
+- **📏 Response Length Presets**: Choose from Breve, Media, Lunga, or Molto Dettagliata
+- **🎯 Default Tone Setting**: Configure your preferred tone (Formale, Professionale, Amichevole, Casual)
+- **🎪 Draggable Widget**: In-page assistant can now be moved by dragging the header
+- **🎯 Smart Floating Widget**: Only appears when selecting text in editable fields (textarea, input, contenteditable)
+- **⚙️ Widget Toggle**: Disable floating widget from settings if you find it distracting
+
+See [CHANGELOG_v2.2.0.md](./CHANGELOG_v2.2.0.md) for complete details.
 
 ## Features
 - Context menu integration with configurable quick prompts that appear on right click inside editable fields.
@@ -38,10 +50,27 @@ Firefox extension that brings your local Ollama models into any text box on the 
 - **Popup workflow**  
   Click the toolbar icon to access the popup (`popup.html`). Choose a model, tone, default prompt, or write your own instruction. The popup retrieves the active tab’s text context, displays the AI result, and lets you accept, discard, or ask for changes without leaving the popup.
 
-- **Settings**  
-  Open the extension’s preferences (`about:addons` → Ollama Textarea Assistant → Preferences) to change the Ollama URL, test available models, and manage the default prompt list. Changes immediately update the context menu and popup.
+- **Settings**
+  Open the extension's preferences (`about:addons` → Ollama Textarea Assistant → Preferences) to:
+  - Configure the Ollama server URL and test connection
+  - Select default model and tone
+  - Manage custom prompt presets
+  - Toggle floating widget visibility
+  - View plugin branding and version info
+
+  Changes immediately sync to all active tabs.
 
 > UI labels are currently in Italian; adjust the source files if you need another language.
+
+## Customization
+
+### Replace Plugin Icons
+The plugin includes placeholder icons in `/icons/`. To add your own branding:
+1. Create icons in the required sizes (16x16, 32x32, 48x48, 96x96, 128x128)
+2. Replace the SVG files in `/icons/` or use PNG format
+3. Update `manifest.json` if changing file format
+
+See [ICONE_ISTRUZIONI.md](./ICONE_ISTRUZIONI.md) for detailed instructions.
 
 ## Architecture
 - `manifest.json` — Declares permissions, content scripts, browser action popup, and options page.

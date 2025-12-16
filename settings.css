@@ -11,10 +11,26 @@ body {
   border-radius: 8px;
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.09);
 }
-header h1 {
+header {
+  display: flex;
+  align-items: center;
+  gap: 20px;
   margin-bottom: 30px;
-  color: #2d3748;
+  padding-bottom: 20px;
+  border-bottom: 3px solid #e2e8f0;
+}
+
+.settings-logo {
+  width: 60px;
+  height: 60px;
+}
+
+header h1 {
+  margin: 0;
+  color: #1a202c;
   font-size: 28px;
+  font-weight: 700;
+  flex: 1;
 }
 .settings-section {
   margin-bottom: 38px;
@@ -30,7 +46,7 @@ header h1 {
 .form-group label {
   display: block;
   margin-bottom: 7px;
-  color: #4a5568;
+  color: #2d3748;
   font-weight: 600;
 }
 .form-group input[type="text"],
@@ -51,6 +67,20 @@ header h1 {
   font-size: 13px;
   color: #718096;
   margin-top: 6px;
+}
+
+.checkbox-label {
+  display: flex !important;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  font-weight: 600 !important;
+}
+
+.checkbox-label input[type="checkbox"] {
+  width: auto !important;
+  margin: 0;
+  cursor: pointer;
 }
 .prompts-list .prompt-item {
   display: flex;

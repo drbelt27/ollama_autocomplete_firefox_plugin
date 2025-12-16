@@ -12,11 +12,26 @@ body {
   padding: 16px;
 }
 
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 2px solid #e2e8f0;
+}
+
+.header-logo {
+  width: 40px;
+  height: 40px;
+}
+
 header h2 {
   font-size: 18px;
-  color: #2d3748;
-  margin: 0 0 16px 0;
-  font-weight: 600;
+  color: #1a202c;
+  margin: 0;
+  font-weight: 700;
+  flex: 1;
 }
 
 .section {
@@ -30,12 +45,12 @@ header h2 {
 label {
   display: block;
   font-weight: 600;
-  color: #4a5568;
+  color: #2d3748;
   font-size: 13px;
   margin-bottom: 6px;
 }
 
-#model, #tone {
+#model, #length {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid #cbd5e0;
@@ -45,10 +60,49 @@ label {
   margin-bottom: 12px;
 }
 
-#model:focus, #tone:focus {
+#model:focus, #length:focus {
   outline: none;
   border-color: #4299e1;
   box-shadow: 0 0 0 3px rgba(66, 153, 225, 0.1);
+}
+
+.tone-buttons {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.tone-btn {
+  padding: 10px 12px;
+  background: white;
+  border: 2px solid #cbd5e0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: #2d3748;
+  transition: all 0.2s;
+}
+
+.tone-btn:hover {
+  background: #edf2f7;
+  border-color: #4299e1;
+  transform: translateY(-1px);
+}
+
+.tone-btn.selected {
+  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  color: white;
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.help-text {
+  font-size: 12px;
+  color: #718096;
+  margin: 4px 0;
+  font-weight: normal;
 }
 
 .prompts-grid {

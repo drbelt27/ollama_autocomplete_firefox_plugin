@@ -7,7 +7,10 @@
 </head>
 <body>
   <div class="container">
-    <header><h1>Impostazioni Ollama Assistant</h1></header>
+    <header>
+      <img src="icons/icon-96.png" alt="Ollama Logo" class="settings-logo" />
+      <h1>Impostazioni Ollama Assistant</h1>
+    </header>
 
     <section class="settings-section">
       <h2>Configurazione Server</h2>
@@ -23,6 +26,34 @@
       </div>
       <button id="test-connection" class="btn btn-secondary">Testa Connessione e Modelli</button>
       <div id="connection-status" class="status-message hidden"></div>
+    </section>
+
+    <section class="settings-section">
+      <h2>Preferenze Assistente</h2>
+      <div class="form-group">
+        <label for="default-tone">Tono di default:</label>
+        <select id="default-tone">
+          <option value="formale">Formale</option>
+          <option value="professionale" selected>Professionale</option>
+          <option value="amichevole">Amichevole</option>
+          <option value="casual">Casual</option>
+        </select>
+        <p class="help-text">Tono predefinito utilizzato per le risposte dell'assistente.</p>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="show-floating-widget" checked />
+          Mostra widget floating quando selezioni il testo
+        </label>
+        <p class="help-text">Disattiva se non vuoi vedere il piccolo widget che appare quando selezioni il testo in un campo editabile.</p>
+      </div>
+      <div class="form-group">
+        <label class="checkbox-label">
+          <input type="checkbox" id="debug-mode" />
+          Abilita modalità debug
+        </label>
+        <p class="help-text">Mostra log dettagliati delle risposte API di Ollama in console per diagnosticare problemi di connessione.</p>
+      </div>
     </section>
 
     <section class="settings-section">

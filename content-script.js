@@ -4,6 +4,32 @@
   if (window.ollamaAssistantInjected) return;
   window.ollamaAssistantInjected = true;
 
+  // Previeni esecuzione in iframe di terze parti (es. reCAPTCHA, ads, ecc.)
+  // Esegui solo se siamo nel frame principale O in iframe dello stesso dominio
+  try {
+    if (window.self !== window.top) {
+      // Siamo in un iframe
+      // Verifica se è dello stesso dominio
+      try {
+        const topDomain = window.top.location.hostname;
+        const currentDomain = window.location.hostname;
+
+        // Se sono domini diversi, non eseguire
+        if (topDomain !== currentDomain) {
+          console.log("Ollama Assistant: iframe terze parti rilevato, skip injection");
+          return;
+        }
+      } catch (e) {
+        // Cross-origin iframe - non possiamo accedere a window.top.location
+        console.log("Ollama Assistant: iframe cross-origin rilevato, skip injection");
+        return;
+      }
+    }
+  } catch (e) {
+    // Se c'è un errore, meglio non eseguire
+    return;
+  }
+
   console.log("Ollama Assistant caricato");
 
   let floatingSelectionWidget = null;
@@ -17,14 +43,41 @@
   let ollamaUrl = "";
   let defaultModel = "";
   let defaultPrompts = [];
+  let defaultTone = "professionale";
+  let selectedTone = "professionale";
+  let showFloatingWidget = true;
+  let isDragging = false;
+  let dragStartX = 0;
+  let dragStartY = 0;
+  let widgetStartX = 0;
+  let widgetStartY = 0;
 
   browser.storage.local
-    .get(["ollamaUrl", "defaultModel", "defaultPrompts"])
+    .get(["ollamaUrl", "defaultModel", "defaultPrompts", "defaultTone", "showFloatingWidget"])
     .then((result) => {
       ollamaUrl = result.ollamaUrl || "http://localhost:11434";
       defaultModel = result.defaultModel || "llama3";
       defaultPrompts = result.defaultPrompts || [];
+      defaultTone = result.defaultTone || "professionale";
+      selectedTone = defaultTone;
+      showFloatingWidget = result.showFloatingWidget !== false;
     });
+
+  // Aggiorna impostazioni quando cambiano
+  browser.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local') {
+      if (changes.showFloatingWidget) {
+        showFloatingWidget = changes.showFloatingWidget.newValue !== false;
+      }
+      if (changes.defaultPrompts) {
+        defaultPrompts = changes.defaultPrompts.newValue || [];
+      }
+      if (changes.defaultTone) {
+        defaultTone = changes.defaultTone.newValue || "professionale";
+        selectedTone = defaultTone;
+      }
+    }
+  });
 
   // FIX CKEditor: Trova iframe CKEditor contenitore
   function findParentCKEditorIframe() {
@@ -278,14 +331,37 @@
     return widget;
   }
 
-  // Widget in-page completo ELEGANTE
+  // Helper per verificare se un elemento è editabile
+  function isEditableElement(element) {
+    if (!element) return false;
+
+    const tagName = element.tagName;
+    if (tagName === "TEXTAREA" || tagName === "INPUT") return true;
+
+    if (element.isContentEditable || element.contentEditable === "true") return true;
+
+    if (tagName === "IFRAME") {
+      try {
+        const iframeDoc = element.contentDocument || element.contentWindow.document;
+        if (iframeDoc && iframeDoc.body && (iframeDoc.body.isContentEditable || iframeDoc.body.contentEditable === "true")) {
+          return true;
+        }
+      } catch (e) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  // Widget in-page completo ELEGANTE E DRAGGABLE
   function createInPageWidget() {
     const widget = document.createElement("div");
     widget.id = "ollama-inpage-widget";
     widget.innerHTML = `
-      <div class="ollama-widget-header">
+      <div class="ollama-widget-header" id="ollama-drag-handle">
         <div class="ollama-header-content">
-          <div class="ollama-logo">✨</div>
+          <img class="ollama-logo" alt="Ollama Logo" />
           <h3>Ollama Assistant</h3>
         </div>
         <button class="ollama-close-btn">
@@ -301,6 +377,13 @@
           <p>Elaborazione in corso...</p>
         </div>
         <div class="ollama-controls">
+          <label>🎯 Tono:</label>
+          <div class="ollama-tone-buttons" id="ollama-tone-buttons">
+            <button class="ollama-tone-btn" data-tone="formale">Formale</button>
+            <button class="ollama-tone-btn" data-tone="professionale">Professionale</button>
+            <button class="ollama-tone-btn" data-tone="amichevole">Amichevole</button>
+            <button class="ollama-tone-btn" data-tone="casual">Casual</button>
+          </div>
           <label>💬 Prompt:</label>
           <textarea id="ollama-prompt-field" placeholder="Inserisci il tuo prompt personalizzato..."></textarea>
           <div class="ollama-prompts-grid" id="ollama-prompts"></div>
@@ -345,12 +428,19 @@
       </div>
     `;
 
+    // Set logo src dynamically
+    const logoImg = widget.querySelector('.ollama-logo');
+    if (logoImg) {
+      logoImg.src = browser.runtime.getURL('icons/icon-48.png');
+    }
+
     widget.style.cssText = `
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      z-index: 2147483647; background: white; border-radius: 16px;
-      box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.05); 
+      z-index: 2147483647; background: white !important; border-radius: 16px;
+      box-shadow: 0 20px 60px rgba(0,0,0,0.3), 0 0 0 1px rgba(0,0,0,0.05);
       width: 550px; max-height: 85vh; overflow: hidden; display: none;
       animation: ollama-slide-in 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+      color: #1a202c !important;
     `;
 
     document.body.appendChild(widget);
@@ -365,11 +455,14 @@
           to { opacity: 1; transform: translate(-50%, -50%); }
         }
         
-        #ollama-inpage-widget { 
-          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif; 
-          color: #1a202c;
+        #ollama-inpage-widget {
+          font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+          color: #1a202c !important;
+          background: white !important;
         }
-        #ollama-inpage-widget * { box-sizing: border-box; }
+        #ollama-inpage-widget * {
+          box-sizing: border-box;
+        }
         
         @media (prefers-color-scheme: dark) {
           #ollama-inpage-widget { background: #1a202c !important; color: #e2e8f0 !important; }
@@ -396,51 +489,81 @@
           }
         }
         
-        .ollama-widget-header { 
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); 
-          color: white; padding: 20px 24px; 
+        .ollama-widget-header {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+          color: white; padding: 20px 24px;
           display: flex; justify-content: space-between; align-items: center;
+          cursor: grab;
+          user-select: none;
         }
-        
+
+        .ollama-widget-header:active {
+          cursor: grabbing;
+        }
+
         .ollama-header-content { display: flex; align-items: center; gap: 12px; }
-        .ollama-logo { font-size: 24px; }
-        .ollama-widget-header h3 { margin: 0; font-size: 20px; font-weight: 600; }
-        
-        .ollama-close-btn { 
-          background: rgba(255,255,255,0.2); border: none; color: white; 
-          width: 32px; height: 32px; border-radius: 8px; cursor: pointer; 
+        .ollama-logo { width: 32px; height: 32px; border-radius: 6px; }
+        .ollama-widget-header h3 { margin: 0; font-size: 20px; font-weight: 600; color: #ffffffff; }
+
+        .ollama-close-btn {
+          background: transparent !important; border: none !important; color: white !important;
+          width: 32px; height: 32px; border-radius: 8px; cursor: pointer;
           display: flex; align-items: center; justify-content: center;
           transition: all 0.2s;
         }
-        .ollama-close-btn:hover { 
-          background: rgba(255,255,255,0.35); 
-          transform: scale(1.05); 
+        .ollama-close-btn:hover {
+          background: rgba(255,255,255,0.1) !important;
+          transform: scale(1.15);
         }
-        .ollama-close-btn svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.3)); }
-        
-        .ollama-widget-body { padding: 24px; max-height: calc(85vh - 72px); overflow-y: auto; }
-        .ollama-widget-body label { 
-          display: block; font-weight: 600; margin-bottom: 10px; 
+        .ollama-close-btn svg { filter: drop-shadow(0 1px 2px rgba(0,0,0,0.5)) !important; }
+
+        .ollama-widget-body {
+          padding: 24px; max-height: calc(85vh - 72px); overflow-y: auto;
+          background: #575757ff !important;
+        }
+        .ollama-widget-body label {
+          display: block; font-weight: 600; margin-bottom: 10px;
           font-size: 14px; color: #4a5568;
         }
-        
-        #ollama-prompt-field { 
-          width: 100%; min-height: 90px; padding: 12px 16px; 
-          border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px; 
-          resize: vertical; margin-bottom: 16px; font-family: inherit;
+
+        .ollama-tone-buttons {
+          display: grid; grid-template-columns: 1fr 1fr;
+          gap: 8px; margin-bottom: 16px;
+        }
+        .ollama-tone-btn {
+          padding: 10px 12px; background: white !important;
+          border: 2px solid #cbd5e0; border-radius: 8px; cursor: pointer;
+          font-size: 13px; font-weight: 500; color: #2d3748 !important;
           transition: all 0.2s;
         }
-        #ollama-prompt-field:focus { 
-          outline: none; border-color: #667eea; 
+        .ollama-tone-btn:hover {
+          background: #edf2f7 !important; border-color: #4299e1;
+          transform: translateY(-1px);
+        }
+        .ollama-tone-btn.selected {
+          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+          color: white !important; border-color: transparent; font-weight: 600;
+        }
+
+        #ollama-prompt-field {
+          width: 100%; min-height: 90px; padding: 12px 16px;
+          border: 2px solid #e2e8f0; border-radius: 10px; font-size: 14px;
+          resize: vertical; margin-bottom: 16px; font-family: inherit;
+          transition: all 0.2s;
+          background: white !important;
+          color: #797979ff !important;
+        }
+        #ollama-prompt-field:focus {
+          outline: none; border-color: #667eea;
           box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
         }
-        
+
         .ollama-prompts-grid { display: grid; grid-template-columns: 1fr; gap: 8px; margin-bottom: 16px; }
-        
-        .ollama-prompt-btn { 
-          padding: 12px 16px; background: white; border: 2px solid #e2e8f0; 
-          border-radius: 10px; cursor: pointer; text-align: left; font-size: 14px; 
-          transition: all 0.2s; font-weight: 500; color: #2d3748;
+
+        .ollama-prompt-btn {
+          padding: 12px 16px; background: white !important; border: 2px solid #e2e8f0;
+          border-radius: 10px; cursor: pointer; text-align: left; font-size: 14px;
+          transition: all 0.2s; font-weight: 500; color: #2d3748 !important;
           position: relative; overflow: hidden;
         }
         .ollama-prompt-btn::before {
@@ -469,11 +592,11 @@
         }
         .ollama-ask-btn:active { transform: translateY(0); }
         
-        .ollama-preview-text { 
-          background: #f7fafc; border: 2px solid #e2e8f0; padding: 16px; 
-          border-radius: 10px; margin-bottom: 16px; white-space: pre-wrap; 
-          max-height: 320px; overflow-y: auto; font-size: 14px; line-height: 1.7; 
-          color: #2d3748;
+        .ollama-preview-text {
+          background: #f7fafc !important; border: 2px solid #e2e8f0; padding: 16px;
+          border-radius: 10px; margin-bottom: 16px; white-space: pre-wrap;
+          max-height: 320px; overflow-y: auto; font-size: 14px; line-height: 1.7;
+          color: #2d3748 !important;
         }
         
         .ollama-actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
@@ -536,13 +659,74 @@
       widget.querySelector(".ollama-controls").classList.remove("hidden");
     };
 
+    // Draggable logic
+    const dragHandle = widget.querySelector("#ollama-drag-handle");
+
+    dragHandle.addEventListener("mousedown", (e) => {
+      if (e.target.closest(".ollama-close-btn")) return;
+
+      isDragging = true;
+      dragStartX = e.clientX;
+      dragStartY = e.clientY;
+
+      const rect = widget.getBoundingClientRect();
+      widgetStartX = rect.left;
+      widgetStartY = rect.top;
+
+      dragHandle.style.cursor = "grabbing";
+      widget.style.transition = "none";
+
+      e.preventDefault();
+    });
+
+    document.addEventListener("mousemove", (e) => {
+      if (!isDragging) return;
+
+      const deltaX = e.clientX - dragStartX;
+      const deltaY = e.clientY - dragStartY;
+
+      const newX = widgetStartX + deltaX;
+      const newY = widgetStartY + deltaY;
+
+      widget.style.left = newX + "px";
+      widget.style.top = newY + "px";
+      widget.style.transform = "none";
+    });
+
+    document.addEventListener("mouseup", () => {
+      if (isDragging) {
+        isDragging = false;
+        dragHandle.style.cursor = "grab";
+      }
+    });
+
     return widget;
   }
 
   function openInPageWidget(selectedPrompt, isCustom) {
+    // Previeni apertura multipla - se il widget è già visibile, non fare nulla
+    if (inPageWidget && inPageWidget.style.display === "block") {
+      console.log("Widget già aperto, ignoro apertura multipla");
+      return;
+    }
+
     if (!inPageWidget) {
       inPageWidget = createInPageWidget();
     }
+
+    // Inizializza bottoni tono
+    const toneButtons = inPageWidget.querySelectorAll(".ollama-tone-btn");
+    toneButtons.forEach((btn) => {
+      btn.classList.remove("selected");
+      if (btn.dataset.tone === selectedTone) {
+        btn.classList.add("selected");
+      }
+      btn.onclick = () => {
+        toneButtons.forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        selectedTone = btn.dataset.tone;
+      };
+    });
 
     // Popola prompt
     const promptsContainer = inPageWidget.querySelector("#ollama-prompts");
@@ -633,12 +817,13 @@ Output: <h2>Hola Mundo</h2><p>Este es texto en <strong>negrita</strong></p>`;
 ${lastSelectedText}
 
 Task: ${prompt}
+Tone: Use a ${selectedTone} tone.
 
 Return ONLY the modified HTML with preserved structure:`;
     } else {
       systemPrompt = `Rispondi ESCLUSIVAMENTE con il testo richiesto, senza aggiungere virgolette, apici, quote o altri caratteri di formattazione attorno al testo. Mantieni ESATTAMENTE la stessa formattazione, struttura, a capo, spaziatura e stile del testo originale. Non aggiungere emoji, simboli strani o caratteri decorativi. Preserva tutti gli "a capo" (\\n), spazi, indentazioni e punteggiatura originali. Non racchiudere mai la risposta tra virgolette.`;
 
-      userMessage = `Testo originale:\n${lastSelectedText}\n\nRichiesta: ${prompt}\n\nRitorna SOLO il testo modificato mantenendo la formattazione identica all'originale, SENZA virgolette attorno.`;
+      userMessage = `Testo originale:\n${lastSelectedText}\n\nRichiesta: ${prompt}\n\nTono: Usa un tono ${selectedTone}.\n\nRitorna SOLO il testo modificato mantenendo la formattazione identica all'originale, SENZA virgolette attorno.`;
     }
 
     const messages = [
@@ -1002,34 +1187,62 @@ Return ONLY the modified HTML with preserved structure:`;
         lastSelectionEnd = lastSelectedText.length;
       }
 
-      if (selection.rangeCount > 0) {
+      // Mostra floating widget solo se:
+      // 1. L'impostazione showFloatingWidget è abilitata
+      // 2. L'elemento attivo è editabile O l'elemento che contiene la selezione è editabile
+      // 3. C'è una selezione valida
+
+      let isInEditableContext = isEditableElement(activeElement);
+
+      // Se activeElement non è editabile, controlla l'elemento della selezione
+      if (!isInEditableContext && selection.rangeCount > 0) {
+        const range = selection.getRangeAt(0);
+        const container = range.commonAncestorContainer;
+        const element = container.nodeType === Node.ELEMENT_NODE ? container : container.parentElement;
+
+        // Verifica se l'elemento o un suo genitore è editabile
+        let current = element;
+        while (current && current !== doc.body) {
+          if (isEditableElement(current)) {
+            isInEditableContext = true;
+            lastActiveElement = current;
+            break;
+          }
+          current = current.parentElement;
+        }
+      }
+
+      if (showFloatingWidget && isInEditableContext && selection.rangeCount > 0) {
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
 
-        if (!floatingSelectionWidget) {
-          floatingSelectionWidget = createFloatingWidget();
+        // Solo se la selezione ha dimensioni visibili
+        if (rect.width > 0 && rect.height > 0) {
+          if (!floatingSelectionWidget) {
+            floatingSelectionWidget = createFloatingWidget();
+          }
+
+          // Calcola posizione considerando iframe
+          let offsetX = 0;
+          let offsetY = 0;
+
+          if (activeInfo.inIframe && activeInfo.iframe) {
+            const iframeRect = activeInfo.iframe.getBoundingClientRect();
+            offsetX = iframeRect.left;
+            offsetY = iframeRect.top;
+          }
+
+          floatingSelectionWidget.style.left =
+            rect.left + offsetX + rect.width / 2 + window.scrollX - 20 + "px";
+          floatingSelectionWidget.style.top =
+            rect.top + offsetY + window.scrollY - 50 + "px";
+          floatingSelectionWidget.style.display = "block";
+
+          setTimeout(() => {
+            if (floatingSelectionWidget)
+              floatingSelectionWidget.style.display = "none";
+          }, 5000);
         }
-
-        // Calcola posizione considerando iframe
-        let offsetX = 0;
-        let offsetY = 0;
-
-        if (activeInfo.inIframe && activeInfo.iframe) {
-          const iframeRect = activeInfo.iframe.getBoundingClientRect();
-          offsetX = iframeRect.left;
-          offsetY = iframeRect.top;
-        }
-
-        floatingSelectionWidget.style.left =
-          rect.left + offsetX + rect.width / 2 + window.scrollX - 20 + "px";
-        floatingSelectionWidget.style.top =
-          rect.top + offsetY + window.scrollY - 50 + "px";
-        floatingSelectionWidget.style.display = "block";
-
-        setTimeout(() => {
-          if (floatingSelectionWidget)
-            floatingSelectionWidget.style.display = "none";
-        }, 5000);
       }
     }, 10);
   });

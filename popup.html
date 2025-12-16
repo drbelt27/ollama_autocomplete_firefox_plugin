@@ -7,8 +7,22 @@
 </head>
 <body>
   <div class="container">
-    <header><h2>Assistente AI Ollama</h2></header>
-    
+    <header>
+      <img src="icons/icon-48.png" alt="Ollama Logo" class="header-logo" />
+      <h2>Assistente AI Ollama</h2>
+    </header>
+
+    <div id="connection-error-section" class="section hidden">
+      <div class="error-message">
+        <p>⚠️ Connessione a Ollama non disponibile</p>
+        <p class="help-text">Configura l'URL del server Ollama nelle impostazioni o riprova la connessione.</p>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button id="retry-connection-btn" class="btn btn-secondary">Riprova</button>
+        <button id="open-settings-btn" class="btn btn-primary">Impostazioni</button>
+      </div>
+    </div>
+
     <div id="controls-section" class="section">
       <div class="model-selector">
         <label for="model">Modello:</label>
@@ -16,13 +30,24 @@
           <option value="">Caricamento...</option>
         </select>
       </div>
-      
+
       <div class="tone-selector">
-        <label for="tone">Tono:</label>
-        <select id="tone">
-          <option value="formale">Formale</option>
-          <option value="professionale" selected>Professionale</option>
-          <option value="amichevole">Amichevole</option>
+        <label>Tono:</label>
+        <div class="tone-buttons">
+          <button class="tone-btn" data-tone="formale">Formale</button>
+          <button class="tone-btn" data-tone="professionale">Professionale</button>
+          <button class="tone-btn" data-tone="amichevole">Amichevole</button>
+          <button class="tone-btn" data-tone="casual">Casual</button>
+        </div>
+      </div>
+
+      <div class="length-selector">
+        <label for="length">Lunghezza Risposta:</label>
+        <select id="length">
+          <option value="breve">Breve</option>
+          <option value="media" selected>Media</option>
+          <option value="lunga">Lunga</option>
+          <option value="dettagliata">Molto Dettagliata</option>
         </select>
       </div>
       
