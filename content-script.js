@@ -6,6 +6,26 @@
   const DEFAULT_TONE = "professionale";
   const LANGUAGE_PREF_DEFAULT = "system";
   const DEFAULT_LANGUAGE = "it";
+  const DEBUG_MODE = true; // Imposta a false per disabilitare i log in produzione
+
+  // Helper per logging condizionale
+  function debugLog(...args) {
+    if (DEBUG_MODE) {
+      console.log('[Ollama Debug]', ...args);
+    }
+  }
+
+  function debugWarn(...args) {
+    if (DEBUG_MODE) {
+      console.warn('[Ollama Debug]', ...args);
+    }
+  }
+
+  function debugError(...args) {
+    if (DEBUG_MODE) {
+      console.error('[Ollama Debug]', ...args);
+    }
+  }
 
   if (window.ollamaAssistantInjected) return;
   window.ollamaAssistantInjected = true;
@@ -22,8 +42,8 @@
   // Fallback se OllamaI18N non è caricato
   const FALLBACK_STRINGS = {
     ai: {
-      htmlSystem: "You are an HTML editor. Preserve every HTML tag and structure exactly as received. Return only the modified HTML without code blocks or explanations.",
-      htmlUserTemplate: "HTML content:\n${text}\n\nInstruction: ${prompt}\nTone: ${tone}.\nReturn only the modified HTML.",
+      htmlSystem: "You are an HTML editor assistant. CRITICAL RULES:\n1. PRESERVE ALL HTML tags, attributes, and structure EXACTLY as received\n2. PRESERVE ALL formatting tags like <strong>, <em>, <b>, <i>, <u>, <br>, paragraphs, lists, etc.\n3. Only modify the TEXT CONTENT inside tags, never remove or change the HTML structure\n4. If text has formatting (bold, italic, lists), KEEP that formatting in the output\n5. Return ONLY the modified HTML without code blocks, explanations, or quotes",
+      htmlUserTemplate: "HTML content:\n${text}\n\nInstruction: ${prompt}\nTone: ${tone}.\n\nIMPORTANT: Modify only the text content. Keep ALL HTML tags and formatting EXACTLY as in the original.",
       plainSystem: "You transform user text. Always keep the same language as the input unless the user explicitly asks for a translation. Return only the transformed text without quotes, code blocks, or explanations.",
       plainUserTemplate: "Original text:\n${text}\n\nRequest: ${prompt}\nTone: ${tone}.\nReturn only the improved text.",
     },
@@ -82,6 +102,8 @@
     lastSelectionStart: 0,
     lastSelectionEnd: 0,
     savedRange: null,
+    savedSelection: null, // Backup della selezione prima che venga persa
+    isWidgetOpen: false, // Previene aperture multiple
     isDragging: false,
     dragStart: { x: 0, y: 0 },
     widgetStart: { x: 0, y: 0 },
@@ -211,29 +233,44 @@
 
   function resolveEditableContext() {
     const activeElement = document.activeElement;
+    debugLog('Resolving context for:', activeElement?.tagName, activeElement?.className);
+
+    // Check if active element is an iframe
     if (activeElement && activeElement.tagName === "IFRAME") {
       try {
         const iframeDoc = activeElement.contentDocument || activeElement.contentWindow.document;
         const body = iframeDoc.body;
         if (body && (body.isContentEditable || body.contentEditable === "true")) {
+          debugLog('Found editable iframe body');
           return { element: body, iframe: activeElement, iframeDoc, inIframe: true };
         }
       } catch (error) {
+        debugWarn('Cannot access iframe:', error.message);
         return { element: document.body, iframe: null, iframeDoc: document, inIframe: false };
       }
     }
 
+    // Check for CKEditor iframe
     const ckIframe = findCkEditorIframe();
     if (ckIframe) {
       try {
         const iframeDoc = ckIframe.contentDocument || ckIframe.contentWindow.document;
+        debugLog('Found CKEditor iframe');
         return { element: iframeDoc.body, iframe: ckIframe, iframeDoc, inIframe: true };
       } catch (error) {
-        // Ignore cross-origin CKEditor frames.
+        debugWarn('Cannot access CKEditor iframe:', error.message);
       }
     }
 
-    return { element: activeElement || document.body, iframe: null, iframeDoc: document, inIframe: false };
+    // Check if active element itself is editable
+    if (activeElement && isEditableElement(activeElement)) {
+      debugLog('Active element is editable:', activeElement.tagName);
+      return { element: activeElement, iframe: null, iframeDoc: document, inIframe: false };
+    }
+
+    // Fallback to document.body
+    debugLog('Using fallback: document.body');
+    return { element: document.body, iframe: null, iframeDoc: document, inIframe: false };
   }
 
   function findCkEditorIframe() {
@@ -372,6 +409,8 @@
   }
   function handleSelectionChange() {
     clearTimeout(state.selectionTimeout);
+    // Quando l'utente fa una nuova selezione, invalida quella salvata
+    state.savedSelection = null;
     state.selectionTimeout = setTimeout(() => captureSelection(true), 40);
   }
 
@@ -379,44 +418,138 @@
     const context = resolveEditableContext();
     const doc = context.iframeDoc;
     const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
-    const selectedText = selection ? selection.toString().trim() : "";
+
+    // Per elementi contentEditable, estrai HTML invece di solo testo
+    let selectedText = "";
+    const isContentEditableContext = context.element &&
+      (context.element.isContentEditable || context.element.contentEditable === "true" || context.element.tagName === "BODY");
+
+    if (selection && selection.rangeCount > 0 && isContentEditableContext) {
+      try {
+        const range = selection.getRangeAt(0);
+        const fragment = range.cloneContents();
+        const tempDiv = doc.createElement("div");
+        tempDiv.appendChild(fragment);
+        const htmlContent = getCleanHTML(tempDiv);
+
+        // Se abbiamo HTML significativo, usalo; altrimenti usa il testo plain
+        if (htmlContent && htmlContent.trim().length > 0 && /<[a-z][\s\S]*>/i.test(htmlContent)) {
+          selectedText = htmlContent;
+          debugLog('Extracted HTML from selection');
+        } else {
+          selectedText = selection.toString().trim();
+          debugLog('Using plain text from selection (no HTML tags found)');
+        }
+      } catch (error) {
+        debugWarn('Error extracting HTML from selection, falling back to text:', error.message);
+        selectedText = selection ? selection.toString().trim() : "";
+      }
+    } else {
+      selectedText = selection ? selection.toString().trim() : "";
+    }
+
+    // Debug logging
+    debugLog('Capture Selection:', {
+      hasSelection: !!selection,
+      rangeCount: selection?.rangeCount || 0,
+      selectedText: selectedText.substring(0, 100),
+      selectedTextLength: selectedText.length,
+      elementTag: context.element?.tagName,
+      isContentEditable: context.element?.isContentEditable,
+      inIframe: context.inIframe,
+      hasSavedSelection: !!state.savedSelection,
+      containsHtml: /<[a-z][\s\S]*>/i.test(selectedText)
+    });
+
+    // Se abbiamo già una selezione salvata e valida, usiamola invece di catturarne una nuova
+    // Questo previene la perdita della selezione quando il focus cambia
+    if (state.savedSelection && state.savedSelection.text && state.savedSelection.text.trim().length > 0) {
+      debugLog('Using previously saved selection:', state.savedSelection.text.substring(0, 50));
+      state.lastSelectedText = state.savedSelection.text;
+      state.lastActiveElement = state.savedSelection.element;
+      state.savedRange = state.savedSelection.range;
+      state.lastSelectionStart = state.savedSelection.start;
+      state.lastSelectionEnd = state.savedSelection.end;
+
+      const hasValidText = state.lastSelectedText && state.lastSelectedText.trim().length > 0;
+      debugLog('Using saved selection, hasValidText:', hasValidText);
+      return hasValidText;
+    }
 
     state.lastActiveElement = context.element;
 
-    if (selectedText) {
+    if (selectedText && selectedText.length > 0) {
       state.lastSelectedText = selectedText;
+      debugLog('Using user selection:', selectedText.substring(0, 50));
+
       if (context.element && (context.element.tagName === "TEXTAREA" || context.element.tagName === "INPUT")) {
         state.lastSelectionStart = context.element.selectionStart || 0;
         state.lastSelectionEnd = context.element.selectionEnd || selectedText.length;
+        // Salva la selezione per uso futuro
+        state.savedSelection = {
+          text: selectedText,
+          element: context.element,
+          range: null,
+          start: state.lastSelectionStart,
+          end: state.lastSelectionEnd
+        };
       } else if (
         context.element &&
         (context.element.isContentEditable || context.element.tagName === "BODY") &&
         selection.rangeCount > 0
       ) {
-        state.savedRange = selection.getRangeAt(0).cloneRange();
-        state.lastSelectionStart = 0;
-        state.lastSelectionEnd = selectedText.length;
+        try {
+          state.savedRange = selection.getRangeAt(0).cloneRange();
+          state.lastSelectionStart = 0;
+          state.lastSelectionEnd = selectedText.length;
+          // Salva la selezione per uso futuro
+          state.savedSelection = {
+            text: selectedText,
+            element: context.element,
+            range: state.savedRange.cloneRange(),
+            start: 0,
+            end: selectedText.length
+          };
+          debugLog('Range saved successfully');
+        } catch (error) {
+          debugError('Error saving range:', error);
+        }
       }
     } else {
+      debugLog('No selection, trying fallback');
       const fallback = getTextFromElement(context.element);
+      debugLog('Fallback text length:', fallback.length);
+
       state.lastSelectedText = fallback;
       if (context.element && (context.element.tagName === "TEXTAREA" || context.element.tagName === "INPUT")) {
         state.lastSelectionStart = 0;
         state.lastSelectionEnd = fallback.length;
       } else if (context.element && (context.element.isContentEditable || context.element.tagName === "BODY")) {
-        const range = doc.createRange();
-        range.selectNodeContents(context.element);
-        state.savedRange = range.cloneRange();
-        state.lastSelectionStart = 0;
-        state.lastSelectionEnd = fallback.length;
+        try {
+          const range = doc.createRange();
+          range.selectNodeContents(context.element);
+          state.savedRange = range.cloneRange();
+          state.lastSelectionStart = 0;
+          state.lastSelectionEnd = fallback.length;
+        } catch (error) {
+          debugError('Error creating fallback range:', error);
+        }
       }
     }
 
-    if (updateFloatingWidget) {
+    const hasValidText = state.lastSelectedText && state.lastSelectedText.trim().length > 0;
+    debugLog('Final state:', {
+      hasValidText: hasValidText,
+      textLength: state.lastSelectedText?.length || 0,
+      willShowWidget: updateFloatingWidget && hasValidText,
+      savedSelectionExists: !!state.savedSelection
+    });
+
+    if (updateFloatingWidget && hasValidText) {
       maybeShowFloatingWidget(context, selection);
     }
 
-    return state.lastSelectedText && state.lastSelectedText.trim().length > 0;
+    return hasValidText;
   }
 
   function ensureGlobalStyles() {
@@ -479,7 +612,27 @@
     widget.style.position = "absolute";
     widget.style.zIndex = "2147483647";
     widget.style.display = "none";
-    widget.querySelector("button").addEventListener("click", () => openWidget(null, false));
+
+    // Usa event listener con debounce per prevenire click multipli
+    const button = widget.querySelector("button");
+    let clickTimeout = null;
+    button.addEventListener("click", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      // Debounce di 300ms
+      if (clickTimeout) {
+        debugLog('Click ignored (debounce)');
+        return;
+      }
+
+      clickTimeout = setTimeout(() => {
+        clickTimeout = null;
+      }, 300);
+
+      openWidget(null, false);
+    });
+
     document.body.appendChild(widget);
     state.floatingWidget = widget;
     return widget;
@@ -915,10 +1068,42 @@
 
 
   function openWidget(selectedPrompt, isCustomPrompt) {
-    if (!captureSelection(false)) {
+    // Previeni aperture multiple
+    if (state.isWidgetOpen) {
+      debugLog('Widget already open, ignoring request');
+      return;
+    }
+
+    debugLog('Opening widget...');
+
+    // Prima di chiamare captureSelection, assicurati di NON invalidare la selezione esistente
+    // se non abbiamo ancora una savedSelection valida
+    const needsCapture = !state.savedSelection || !state.savedSelection.text;
+
+    if (needsCapture) {
+      debugLog('Need to capture selection first');
+      // Temporaneamente disabilita l'invalidazione della selezione
+      const tempSavedSelection = state.savedSelection;
+      const hasText = captureSelection(false);
+
+      // Se captureSelection non ha trovato niente ma avevamo una selezione temporanea, ripristinala
+      if (!hasText && tempSavedSelection) {
+        state.savedSelection = tempSavedSelection;
+      }
+    }
+
+    debugLog('Has text:', !!state.lastSelectedText);
+    debugLog('Last selected text:', state.lastSelectedText?.substring(0, 100));
+
+    if (!state.lastSelectedText || state.lastSelectedText.trim().length === 0) {
+      debugError('No text captured, showing alert');
       alert(state.strings.widget.selectTextAlert);
       return;
     }
+
+    // Imposta il flag prima di mostrare il widget
+    state.isWidgetOpen = true;
+    debugLog('Widget state set to open');
 
     const widget = ensureWidget();
     widget.style.display = "block";
@@ -952,6 +1137,11 @@
     state.conversationHistory = [];
     state.isDragging = false;
     state.currentDragHandle = null;
+    // Pulisci la selezione salvata quando chiudi il widget
+    state.savedSelection = null;
+    // Resetta il flag per permettere nuove aperture
+    state.isWidgetOpen = false;
+    debugLog('Widget closed, saved selection cleared, widget state reset');
   }
   function handleAskFromWidget() {
     if (!state.inPageWidget) return;
@@ -1019,6 +1209,12 @@
 
   async function requestOllama(prompt) {
     const containsHtml = /<\/?[a-z][\s\S]*>/i.test(state.lastSelectedText);
+    debugLog('Request Ollama:', {
+      containsHtml: containsHtml,
+      textPreview: state.lastSelectedText.substring(0, 100),
+      promptType: containsHtml ? 'HTML' : 'Plain'
+    });
+
     const toneText =
       state.strings.toneMentions?.[state.selectedTone] || state.selectedTone;
     const systemPrompt = containsHtml
@@ -1027,6 +1223,9 @@
     const template = containsHtml
       ? state.strings.ai.htmlUserTemplate
       : state.strings.ai.plainUserTemplate;
+
+    debugLog('System prompt being used:', systemPrompt.substring(0, 150) + '...');
+
     const userPrompt = formatTemplate(template, {
       text: state.lastSelectedText,
       prompt,
@@ -1077,6 +1276,8 @@
     const text = preview.textContent.trim();
     const hasHtml = /<\/?[a-z]/i.test(html);
     replaceTextInElement(hasHtml ? html : text);
+    // Pulisci la selezione salvata dopo l'inserimento
+    state.savedSelection = null;
     closeWidget();
   }
 
@@ -1174,8 +1375,12 @@
   }
   function handleRuntimeMessage(message, sender, sendResponse) {
     if (message.type === "OPEN_WIDGET") {
-      captureSelection(false);
-      if (!state.lastSelectedText) {
+      // Il controllo di widget già aperto è gestito in openWidget
+      // Ma catturiamo la selezione prima se necessario
+      if (!state.savedSelection || !state.savedSelection.text) {
+        captureSelection(false);
+      }
+      if (!state.lastSelectedText && (!state.savedSelection || !state.savedSelection.text)) {
         alert(state.strings.widget.selectTextAlert);
         sendResponse({ status: "error", message: "No text" });
         return true;

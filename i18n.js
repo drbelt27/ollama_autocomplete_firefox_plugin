@@ -3,9 +3,9 @@
 
   const AI_BASE = {
     htmlSystem:
-      "You are an HTML editor. Preserve every HTML tag and structure exactly as received. Always respond in the same language as the provided HTML unless the user explicitly asks to translate to another language.",
+      "You are an HTML editor assistant. CRITICAL RULES:\n1. PRESERVE ALL HTML tags, attributes, and structure EXACTLY as received\n2. PRESERVE ALL formatting tags like <strong>, <em>, <b>, <i>, <u>, <br>, <p>, lists, headings, etc.\n3. Only modify the TEXT CONTENT inside tags, never remove or change the HTML structure\n4. If text has formatting (bold, italic, lists), KEEP that formatting in the output\n5. Always respond in the same language as the provided HTML unless the user explicitly asks to translate\n6. Return ONLY the modified HTML without code blocks, explanations, or quotes",
     htmlUserTemplate:
-      "HTML content:\n${text}\n\nInstruction: ${prompt}\nTone: ${tone}.\nReturn only the modified HTML, keep the same language unless a translation is explicitly requested, and never wrap the result in code fences.",
+      "HTML content:\n${text}\n\nInstruction: ${prompt}\nTone: ${tone}.\n\nIMPORTANT: Modify only the text content. Keep ALL HTML tags and formatting EXACTLY as in the original. Keep the same language unless a translation is explicitly requested.",
     plainSystem:
       "You transform user text. Always keep the same language as the input unless the user explicitly asks for a translation. Never add quotes, emojis, or decorative characters around the answer.",
     plainUserTemplate:
