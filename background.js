@@ -141,11 +141,20 @@ browser.contextMenus.onClicked.addListener(async (info, tab) => {
 browser.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message.type !== "OLLAMA_REQUEST") return false;
 
-  fetch(message.url, {
-    method: "POST",
+  // Determina il metodo HTTP in base all'endpoint
+  const method = message.method || (message.url.includes('/api/tags') ? 'GET' : 'POST');
+
+  const fetchOptions = {
+    method: method,
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(message.body),
-  })
+  };
+
+  // Aggiungi il body solo per le richieste POST
+  if (method === 'POST') {
+    fetchOptions.body = JSON.stringify(message.body);
+  }
+
+  fetch(message.url, fetchOptions)
     .then((response) => {
       if (!response.ok) {
         return response.text().then((text) => {

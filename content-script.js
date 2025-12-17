@@ -6,23 +6,22 @@
   const DEFAULT_TONE = "professionale";
   const LANGUAGE_PREF_DEFAULT = "system";
   const DEFAULT_LANGUAGE = "it";
-  const DEBUG_MODE = true; // Imposta a false per disabilitare i log in produzione
 
-  // Helper per logging condizionale
+  // Helper per logging condizionale - verrà usato lo stato per determinare se loggare
   function debugLog(...args) {
-    if (DEBUG_MODE) {
+    if (state.debugMode) {
       console.log('[Ollama Debug]', ...args);
     }
   }
 
   function debugWarn(...args) {
-    if (DEBUG_MODE) {
+    if (state.debugMode) {
       console.warn('[Ollama Debug]', ...args);
     }
   }
 
   function debugError(...args) {
-    if (DEBUG_MODE) {
+    if (state.debugMode) {
       console.error('[Ollama Debug]', ...args);
     }
   }
@@ -113,6 +112,7 @@
     languagePreference: LANGUAGE_PREF_DEFAULT,
     language: typeof window.OllamaI18N !== 'undefined' ? window.OllamaI18N.resolveLanguage(LANGUAGE_PREF_DEFAULT) : DEFAULT_LANGUAGE,
     strings: getLanguagePack(),
+    debugMode: false, // Flag per abilitare i log di debug
     config: {
       ollamaUrl: DEFAULT_URL,
       defaultModel: DEFAULT_MODEL,
@@ -163,6 +163,7 @@
       "defaultTone",
       "showFloatingWidget",
       "language",
+      "debugMode",
     ]);
 
     state.languagePreference = stored.language || LANGUAGE_PREF_DEFAULT;
@@ -179,6 +180,7 @@
     state.config.defaultTone = stored.defaultTone || DEFAULT_TONE;
     state.config.showFloatingWidget = stored.showFloatingWidget !== false;
     state.selectedTone = state.config.defaultTone;
+    state.debugMode = stored.debugMode === true;
   }
 
   function subscribeToStorageChanges() {
@@ -198,6 +200,9 @@
         state.config.defaultTone = changes.defaultTone.newValue || DEFAULT_TONE;
         state.selectedTone = state.config.defaultTone;
         renderToneButtons();
+      }
+      if (changes.debugMode) {
+        state.debugMode = changes.debugMode.newValue === true;
       }
       if (changes.language) {
         state.languagePreference = changes.language.newValue || LANGUAGE_PREF_DEFAULT;
@@ -620,15 +625,15 @@
       e.preventDefault();
       e.stopPropagation();
 
-      // Debounce di 300ms
-      if (clickTimeout) {
-        debugLog('Click ignored (debounce)');
+      // Previeni click multipli sia con debounce che con il flag isWidgetOpen
+      if (clickTimeout || state.isWidgetOpen) {
+        debugLog('Click ignored (debounce or widget already open)');
         return;
       }
 
       clickTimeout = setTimeout(() => {
         clickTimeout = null;
-      }, 300);
+      }, 500); // Aumentato a 500ms per maggiore sicurezza
 
       openWidget(null, false);
     });
@@ -769,6 +774,7 @@
       #ollama-inpage-widget * {
         box-sizing: border-box;
         font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        color: #1f2933;
       }
       #ollama-inpage-widget h3 {
         margin: 0;
@@ -874,6 +880,7 @@
         resize: vertical;
         font-size: 14px;
         background: #fff;
+        color: #1f2933 !important;
       }
       .ollama-prompts-grid {
         display: grid;
@@ -902,6 +909,9 @@
       .ollama-error {
         margin-top: 20px;
       }
+      .ollama-loading-text {
+        color: #1f2933 !important;
+      }
       .ollama-spinner {
         width: 50px;
         height: 50px;
@@ -922,6 +932,10 @@
         overflow-y: auto;
         white-space: pre-wrap;
         background: #fff;
+        color: #1f2933 !important;
+      }
+      .ollama-preview-text * {
+        color: inherit !important;
       }
       .ollama-actions {
         display: grid;
@@ -951,6 +965,9 @@
         background: #fff5f5;
         text-align: center;
       }
+      .ollama-error p {
+        color: #1f2933 !important;
+      }
       .ollama-error .error-icon {
         width: 40px;
         height: 40px;
@@ -961,7 +978,7 @@
         justify-content: center;
         margin-bottom: 12px;
         font-weight: 700;
-        color: #ef4444;
+        color: #ef4444 !important;
       }
       .hidden { display: none !important; }
     `;
@@ -1076,6 +1093,9 @@
 
     debugLog('Opening widget...');
 
+    // Imposta il flag SUBITO per prevenire doppie aperture
+    state.isWidgetOpen = true;
+
     // Prima di chiamare captureSelection, assicurati di NON invalidare la selezione esistente
     // se non abbiamo ancora una savedSelection valida
     const needsCapture = !state.savedSelection || !state.savedSelection.text;
@@ -1097,12 +1117,11 @@
 
     if (!state.lastSelectedText || state.lastSelectedText.trim().length === 0) {
       debugError('No text captured, showing alert');
+      state.isWidgetOpen = false; // Reset il flag se non possiamo aprire
       alert(state.strings.widget.selectTextAlert);
       return;
     }
 
-    // Imposta il flag prima di mostrare il widget
-    state.isWidgetOpen = true;
     debugLog('Widget state set to open');
 
     const widget = ensureWidget();
@@ -1373,10 +1392,16 @@
       }
     });
   }
-  function handleRuntimeMessage(message, sender, sendResponse) {
+  function handleRuntimeMessage(message, _sender, sendResponse) {
     if (message.type === "OPEN_WIDGET") {
-      // Il controllo di widget già aperto è gestito in openWidget
-      // Ma catturiamo la selezione prima se necessario
+      // Previeni aperture multiple
+      if (state.isWidgetOpen) {
+        debugLog('Widget already open, ignoring OPEN_WIDGET message');
+        sendResponse({ status: "error", message: "Widget already open" });
+        return true;
+      }
+
+      // Catturiamo la selezione prima se necessario
       if (!state.savedSelection || !state.savedSelection.text) {
         captureSelection(false);
       }
